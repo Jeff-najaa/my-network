@@ -18,18 +18,21 @@ async function fetchCloud(pin) {
 
 async function saveCloud(pin, payload) {
   try {
-    await fetch(`${SB_URL}/rest/v1/rpc/save_data`, {
+    const r = await fetch(`${SB_URL}/rest/v1/rpc/save_data`, {
       method:"POST",
       headers:{"Content-Type":"application/json","apikey":SB_KEY,"Authorization":`Bearer ${SB_KEY}`},
       body: JSON.stringify({ p_pin: pin, p_payload: payload }),
     });
-  } catch(_) {}
+    return r.ok;
+  } catch(_) { return false; }
 }
 
 /* ─── KEYS ──────────────────────────────────────────────────────── */
-const PHOTO_PREFIX = "nw-photo-";
-const CACHE_KEY    = "nw-cache";
-const PIN_KEY      = "nw-pin";
+const PHOTO_PREFIX  = "nw-photo-";
+const CACHE_KEY     = "nw-cache";
+const PIN_KEY       = "nw-pin";
+const EXPORT_KEY    = "nw-last-export";
+const PROFILE_PREFIX = "nw-pp-";
 
 /* ─── DEFAULT SEEDS ─────────────────────────────────────────────── */
 const DEFAULT_INDUSTRIES = [
@@ -128,10 +131,29 @@ async function resizeImage(file) {
   });
 }
 
+async function resizeProfilePhoto(file) {
+  return new Promise(resolve=>{
+    const reader=new FileReader();
+    reader.onload=e=>{
+      const img=new Image();
+      img.onload=()=>{
+        const SIZE=240;
+        const s=Math.min(img.width,img.height);
+        const sx=(img.width-s)/2,sy=(img.height-s)/2;
+        const cv=document.createElement("canvas");cv.width=SIZE;cv.height=SIZE;
+        cv.getContext("2d").drawImage(img,sx,sy,s,s,0,0,SIZE,SIZE);
+        resolve(cv.toDataURL("image/jpeg",0.65));
+      };img.src=e.target.result;
+    };reader.readAsDataURL(file);
+  });
+}
+
 /* ─── DATA HELPERS ──────────────────────────────────────────────── */
 function blank(ctxId="event") {
   return {nickname:"",fullName:"",role:"",company:"",context:ctxId,contextNote:"",
-          industryTags:[],funFact:"",notes:"",photo:null,photoCleared:false,
+          industryTags:[],funFact:"",notes:"",
+          profilePhoto:null,profilePhotoCleared:false,
+          cardPhoto:null,cardPhotoCleared:false,
           socials:{instagram:"",facebook:"",line:""}};
 }
 function formToContact(form,existingId) {
@@ -141,10 +163,11 @@ function formToContact(form,existingId) {
     socials:{instagram:(form.socials?.instagram||"").trim(),facebook:(form.socials?.facebook||"").trim(),line:(form.socials?.line||"").trim()},
     addedAt:existingId?undefined:new Date().toISOString()};
 }
-function contactToForm(c,photo=null) {
+function contactToForm(c,profilePhoto=null,cardPhoto=null) {
   return {nickname:c.nickname||c.name||"",fullName:c.fullName||"",role:c.role||"",company:c.company||"",
     context:c.context||"event",contextNote:c.contextNote||"",industryTags:c.industryTags||c.tags||[],
-    funFact:c.funFact||(c.helpsWith||[]).join(", ")||"",notes:c.notes||"",photo,photoCleared:false,
+    funFact:c.funFact||(c.helpsWith||[]).join(", ")||"",notes:c.notes||"",
+    profilePhoto,profilePhotoCleared:false,cardPhoto,cardPhotoCleared:false,
     socials:{instagram:c.socials?.instagram||"",facebook:c.socials?.facebook||"",line:c.socials?.line||""}};
 }
 
@@ -238,7 +261,7 @@ function TabBar({active,onChange}) {
 }
 
 /* ─── ORG CHART ─────────────────────────────────────────────────── */
-function OrgChart({members,contacts,onNodePress}) {
+function OrgChart({members,contacts,profilePhotos={},onNodePress}) {
   if(!members||members.length===0) return null;
   const NW=118,NH=72,HG=16,VG=50,PAD=20;
   const childOf={};
@@ -269,7 +292,7 @@ function OrgChart({members,contacts,onNodePress}) {
           return (
             <div key={m.id} onClick={()=>contact&&onNodePress(contact)}
               style={{position:"absolute",left:p.cx-NW/2+PAD,top:p.y,width:NW,height:NH,background:C.white,borderRadius:12,boxShadow:"0 2px 8px rgba(0,0,0,0.08)",border:`1.5px solid ${C.border}`,cursor:contact?"pointer":"default",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"8px 6px",overflow:"hidden"}}>
-              <div style={{width:32,height:32,borderRadius:9,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:800,flexShrink:0}}>{initials(dn)}</div>
+              {profilePhotos[m.contactId]?(<img src={profilePhotos[m.contactId]} alt="" style={{width:32,height:32,borderRadius:9,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:32,height:32,borderRadius:9,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:800,flexShrink:0}}>{initials(dn)}</div>)}
               <div style={{width:"100%",textAlign:"center",lineHeight:1.25}}>
                 <div style={{fontSize:11,fontWeight:700,color:contact?C.text:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dn}</div>
                 {m.role&&<div style={{fontSize:9,color:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:1}}>{m.role}</div>}
@@ -285,8 +308,11 @@ function OrgChart({members,contacts,onNodePress}) {
 /* ─── MAIN APP ──────────────────────────────────────────────────── */
 export default function App() {
   /* Auth */
-  const [pin,     setPin]     = useState("");
-  const [needPin, setNeedPin] = useState(true);
+  const [pin,               setPin]              = useState("");
+  const [needPin,           setNeedPin]          = useState(true);
+  const [lastSynced,        setLastSynced]       = useState(null);
+  const [showExportReminder,setShowExportReminder]= useState(false);
+  const [profilePhotos,     setProfilePhotos]     = useState({});
   /* Data */
   const [contacts,     setContacts]     = useState([]);
   const [industries,   setIndustries]   = useState(DEFAULT_INDUSTRIES);
@@ -296,7 +322,8 @@ export default function App() {
   /* Network view */
   const [view,         setView]         = useState("list");
   const [selected,     setSelected]     = useState(null);
-  const [selectedPhoto,setSelectedPhoto]= useState(null);
+  const [selectedPhoto,     setSelectedPhoto]     = useState(null);
+  const [selectedCardPhoto, setSelectedCardPhoto] = useState(null);
   const [isEdit,       setIsEdit]       = useState(false);
   const [form,         setForm]         = useState(blank());
   const [search,       setSearch]       = useState("");
@@ -332,8 +359,9 @@ export default function App() {
   const [qIndVal,      setQIndVal]      = useState("");
   const [showQCtx,     setShowQCtx]     = useState(false);
   const [qCtxVal,      setQCtxVal]      = useState("");
-  const photoRef  = useRef(null);
-  const importRef = useRef(null);
+  const profilePhotoRef = useRef(null);
+  const cardPhotoRef    = useRef(null);
+  const importRef       = useRef(null);
 
   /* ── Load on startup ── */
   useEffect(()=>{
@@ -349,7 +377,7 @@ export default function App() {
           /* offline: try local cache */
           try {
             const cached = localStorage.getItem(CACHE_KEY);
-            if(cached) { applyData(JSON.parse(cached)); setPin(savedPin); setNeedPin(false); }
+            if(cached) { const d=JSON.parse(cached);applyData(d);const ppMap={};(d.contacts||[]).forEach(c=>{const p=localStorage.getItem(PROFILE_PREFIX+c.id);if(p)ppMap[c.id]=p;});setProfilePhotos(ppMap);setPin(savedPin); setNeedPin(false); }
             else { localStorage.removeItem(PIN_KEY); setNeedPin(true); }
           } catch(_) { setNeedPin(true); }
         }
@@ -376,7 +404,6 @@ export default function App() {
   };
 
   /* ── Cloud + cache sync ── */
-  /* Called after every data change with just the slice that changed */
   const persistAll = (overrides={}) => {
     const payload = {
       contacts:   "contacts"   in overrides ? overrides.contacts   : contacts,
@@ -386,7 +413,9 @@ export default function App() {
       cautions:   "cautions"   in overrides ? overrides.cautions   : cautions,
     };
     try { localStorage.setItem(CACHE_KEY, JSON.stringify(payload)); } catch(_) {}
-    if(pin) saveCloud(pin, payload);
+    if(pin) {
+      saveCloud(pin, payload).then(ok => { if(ok) setLastSynced(new Date()); });
+    }
   };
 
   /* ── Slice save helpers ── */
@@ -415,6 +444,8 @@ export default function App() {
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
     const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;
     a.download=`my-network-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);
+    localStorage.setItem(EXPORT_KEY, new Date().toISOString());
+    setShowExportReminder(false);
   };
   const importData=(e)=>{
     const file=e.target.files?.[0];if(!file)return;
@@ -434,18 +465,41 @@ export default function App() {
     };reader.readAsText(file);e.target.value="";
   };
 
+  /* ── 30-day export reminder ── */
+  useEffect(()=>{
+    if(needPin) return;
+    let last = localStorage.getItem(EXPORT_KEY);
+    if(!last) {
+      localStorage.setItem(EXPORT_KEY, new Date().toISOString());
+      return;
+    }
+    const days = (Date.now() - new Date(last).getTime()) / (1000*60*60*24);
+    if(days > 30) setShowExportReminder(true);
+  }, [needPin]);
+
+  /* ── Format sync time ── */
+  function fmtSynced(d) {
+    if(!d) return "Not yet synced this session";
+    const diff = Date.now() - d.getTime();
+    const mins = Math.floor(diff/60000);
+    if(mins < 1)  return "Synced just now ✓";
+    if(mins < 60) return `Synced ${mins}m ago ✓`;
+    return `Synced ${Math.floor(mins/60)}h ago ✓`;
+  }
+
   /* ── Form helpers ── */
   const fv=k=>form[k];const sf=k=>e=>setForm(p=>({...p,[k]:e.target.value}));
   const toggleInd=ind=>setForm(p=>{const cur=p.industryTags||[];return{...p,industryTags:cur.includes(ind)?cur.filter(t=>t!==ind):[...cur,ind]};});
-  const handlePhoto=useCallback(async e=>{const file=e.target.files?.[0];if(!file)return;try{const r=await resizeImage(file);setForm(p=>({...p,photo:r,photoCleared:false}));}catch(_){}e.target.value="";},[]);
+  const handleProfilePhoto=useCallback(async e=>{const file=e.target.files?.[0];if(!file)return;try{const r=await resizeImage(file);setForm(p=>({...p,profilePhoto:r,profilePhotoCleared:false}));}catch(_){}e.target.value="";},[]);
+  const handleCardPhoto   =useCallback(async e=>{const file=e.target.files?.[0];if(!file)return;try{const r=await resizeImage(file);setForm(p=>({...p,cardPhoto:r,cardPhotoCleared:false}));}catch(_){}e.target.value="";},[]);
 
   /* ── Contact CRUD ── */
-  const openDetail=(c,origin="network")=>{setSelected(c);setDelConfirm(false);setDetailOrigin(origin);setView("detail");try{setSelectedPhoto(localStorage.getItem(PHOTO_PREFIX+c.id)||null);}catch(_){setSelectedPhoto(null);}};
-  const openEdit=useCallback(()=>{setForm(contactToForm(selected,selectedPhoto||null));setIsEdit(true);setView("form");},[selected,selectedPhoto]);
+  const openDetail=(c,origin="network")=>{setSelected(c);setDelConfirm(false);setDetailOrigin(origin);setView("detail");try{setSelectedPhoto(localStorage.getItem(PHOTO_PREFIX+c.id)||null);}catch(_){setSelectedPhoto(null);}try{setSelectedCardPhoto(localStorage.getItem(PHOTO_PREFIX+c.id+"-card")||null);}catch(_){setSelectedCardPhoto(null);}};
+  const openEdit=useCallback(()=>{setForm(contactToForm(selected,selectedPhoto||null,selectedCardPhoto||null));setIsEdit(true);setView("form");},[selected,selectedPhoto,selectedCardPhoto]);
   const backFromDetail=()=>{setDelConfirm(false);setView("list");if(detailOrigin==="tree")setActiveTab("trees");else if(detailOrigin==="caut")setActiveTab("cautious");setDetailOrigin("network");};
-  const addContact=()=>{if(!fv("nickname").trim())return;const c=formToContact(form);const updated=[c,...contacts];persist(updated);if(form.photo){try{localStorage.setItem(PHOTO_PREFIX+c.id,form.photo);}catch(_){}}setForm(blank(contexts[0]?.id));setShowQInd(false);setShowQCtx(false);setView("list");};
-  const saveEdit=()=>{if(!fv("nickname").trim())return;const c=formToContact(form,selected.id);const updated=contacts.map(x=>x.id===selected.id?c:x);persist(updated);if(form.photo){try{localStorage.setItem(PHOTO_PREFIX+selected.id,form.photo);}catch(_){}}else if(form.photoCleared){try{localStorage.removeItem(PHOTO_PREFIX+selected.id);}catch(_){}}setSelected(updated.find(x=>x.id===selected.id));setSelectedPhoto(form.photoCleared?null:(form.photo||selectedPhoto||null));setView("detail");};
-  const removeContact=()=>{const updated=contacts.filter(c=>c.id!==selected.id);persist(updated);try{localStorage.removeItem(PHOTO_PREFIX+selected.id);}catch(_){}setDelConfirm(false);setView("list");};
+  const addContact=()=>{if(!fv("nickname").trim())return;const c=formToContact(form);const updated=[c,...contacts];persist(updated);if(form.profilePhoto){try{localStorage.setItem(PHOTO_PREFIX+c.id,form.profilePhoto);}catch(_){}}if(form.cardPhoto){try{localStorage.setItem(PHOTO_PREFIX+c.id+"-card",form.cardPhoto);}catch(_){}}setForm(blank(contexts[0]?.id));setShowQInd(false);setShowQCtx(false);setView("list");};
+  const saveEdit=()=>{if(!fv("nickname").trim())return;const c=formToContact(form,selected.id);const updated=contacts.map(x=>x.id===selected.id?c:x);persist(updated);if(form.profilePhoto){try{localStorage.setItem(PHOTO_PREFIX+selected.id,form.profilePhoto);}catch(_){}}else if(form.profilePhotoCleared){try{localStorage.removeItem(PHOTO_PREFIX+selected.id);}catch(_){}}if(form.cardPhoto){try{localStorage.setItem(PHOTO_PREFIX+selected.id+"-card",form.cardPhoto);}catch(_){}}else if(form.cardPhotoCleared){try{localStorage.removeItem(PHOTO_PREFIX+selected.id+"-card");}catch(_){}}setSelected(updated.find(x=>x.id===selected.id));setSelectedPhoto(form.profilePhotoCleared?null:(form.profilePhoto||selectedPhoto||null));setSelectedCardPhoto(form.cardPhotoCleared?null:(form.cardPhoto||selectedCardPhoto||null));setView("detail");};
+  const removeContact=()=>{const updated=contacts.filter(c=>c.id!==selected.id);persist(updated);try{localStorage.removeItem(PHOTO_PREFIX+selected.id);}catch(_){}try{localStorage.removeItem(PHOTO_PREFIX+selected.id+"-card");}catch(_){}setDelConfirm(false);setView("list");};
 
   /* ── Tree CRUD ── */
   const startNewTree  =()=>{setEditTree({id:null,name:"",type:"company",members:[]});setTPickSearch("");setTreeDelCfm(false);setTView("editor");};
@@ -474,6 +528,21 @@ export default function App() {
   /* ── Gate renders ── */
   if(!ready) return <div style={{...WRAP,display:"flex",alignItems:"center",justifyContent:"center",height:"100vh"}}><div style={{color:C.muted,fontSize:15}}>Loading…</div></div>;
   if(needPin) return <PinScreen onUnlock={handleUnlock}/>;
+
+  /* ── Export reminder modal ── */
+  const ExportReminder = showExportReminder ? (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.5)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center",padding:"20px",fontFamily:"inherit"}}>
+      <div style={{background:C.white,borderRadius:20,padding:"28px 24px",maxWidth:340,width:"100%",boxShadow:"0 20px 60px rgba(0,0,0,0.3)"}}>
+        <div style={{fontSize:44,textAlign:"center",marginBottom:12}}>💾</div>
+        <div style={{fontSize:18,fontWeight:800,color:C.text,textAlign:"center",marginBottom:8}}>Time for a backup!</div>
+        <div style={{fontSize:14,color:C.muted,textAlign:"center",lineHeight:1.7,marginBottom:24}}>It has been over 30 days since your last export. Save a backup file now to protect your network data.</div>
+        <div style={{display:"flex",gap:10}}>
+          <button onClick={()=>setShowExportReminder(false)} style={{flex:1,padding:13,border:`1.5px solid ${C.border}`,background:"transparent",borderRadius:12,fontSize:14,fontWeight:600,color:C.muted,cursor:"pointer",fontFamily:"inherit"}}>Remind me later</button>
+          <button onClick={exportData} style={{flex:1,padding:13,background:C.navy,border:"none",borderRadius:12,fontSize:14,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"inherit"}}>⬇️ Export Now</button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   /* ════ CONTACT FORM ════ */
   if(view==="form") {
@@ -511,7 +580,27 @@ export default function App() {
           <InfoCard><FL>Fun Fact / Notes</FL><textarea value={fv("funFact")} onChange={sf("funFact")} rows={3} placeholder="e.g. Speaks 4 languages, ex-F1 engineer…" style={{...INP,resize:"none",lineHeight:1.55}}/></InfoCard>
           <InfoCard><FL>Insecurity / Weakness</FL><textarea value={fv("notes")} onChange={sf("notes")} rows={3} placeholder="Personal vulnerabilities or sensitivities to keep in mind…" style={{...INP,resize:"none",lineHeight:1.55}}/></InfoCard>
           <InfoCard><FL>Social Media</FL>{SOCIALS.map((p,i)=>(<div key={p.id}>{i>0&&<Hr/>}<div style={{display:"flex",alignItems:"center",gap:10}}><div style={{width:36,height:36,borderRadius:10,background:p.grad,flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:900}}>{p.abbr}</div><div style={{flex:1}}><div style={{fontSize:10,fontWeight:800,color:C.muted,letterSpacing:0.8,textTransform:"uppercase",marginBottom:4}}>{p.label}</div><input value={fv("socials")?.[p.id]||""} onChange={e=>setForm(prev=>({...prev,socials:{...prev.socials,[p.id]:e.target.value}}))} placeholder={p.placeholder} style={INP}/></div></div></div>))}</InfoCard>
-          <InfoCard><FL>Photo / Business Card</FL><input ref={photoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handlePhoto}/>{fv("photo")?(<div style={{position:"relative"}}><img src={fv("photo")} alt="" style={{width:"100%",borderRadius:10,maxHeight:260,objectFit:"cover",display:"block"}}/><button onClick={()=>setForm(p=>({...p,photo:null,photoCleared:true}))} style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.55)",border:"none",color:"#fff",borderRadius:"50%",width:30,height:30,cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>×</button></div>):(<div onClick={()=>photoRef.current?.click()} style={{border:`2px dashed ${C.border}`,borderRadius:12,padding:"22px 16px",textAlign:"center",cursor:"pointer"}}><div style={{fontSize:26,marginBottom:6}}>📷</div><div style={{fontSize:13,color:C.muted,fontWeight:500}}>Tap to attach a photo or business card</div></div>)}</InfoCard>
+          <InfoCard>
+            <FL>Profile Picture</FL>
+            <input ref={profilePhotoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleProfilePhoto}/>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+              <div style={{position:"relative",width:90,height:90}}>
+                {fv("profilePhoto")?(
+                  <img src={fv("profilePhoto")} alt="" style={{width:90,height:90,borderRadius:45,objectFit:"cover",border:`2px solid ${C.border}`}}/>
+                ):(
+                  <div style={{width:90,height:90,borderRadius:45,background:gradient(fv("nickname")||"?"),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:28,fontWeight:800}}>{initials(fv("nickname")||"?")}</div>
+                )}
+                {fv("profilePhoto")&&<button onClick={()=>setForm(p=>({...p,profilePhoto:null,profilePhotoCleared:true}))} style={{position:"absolute",top:0,right:0,width:24,height:24,borderRadius:12,background:C.red,border:"2px solid #fff",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>×</button>}
+              </div>
+              <button onClick={()=>profilePhotoRef.current?.click()} style={{padding:"7px 18px",background:"#F3F4F6",border:`1px solid ${C.border}`,borderRadius:9,fontSize:13,fontWeight:600,color:C.text,cursor:"pointer",fontFamily:"inherit"}}>{fv("profilePhoto")?"Change Photo":"Add Profile Photo"}</button>
+              <div style={{fontSize:11,color:C.muted}}>Shown on your contact cards</div>
+            </div>
+          </InfoCard>
+          <InfoCard>
+            <FL>Business Card / Others</FL>
+            <input ref={photoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handlePhoto}/>
+            {fv("photo")?(<div style={{position:"relative"}}><img src={fv("photo")} alt="" style={{width:"100%",borderRadius:10,maxHeight:220,objectFit:"cover",display:"block"}}/><button onClick={()=>setForm(p=>({...p,photo:null,photoCleared:true}))} style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.55)",border:"none",color:"#fff",borderRadius:"50%",width:30,height:30,cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>×</button></div>):(<div onClick={()=>photoRef.current?.click()} style={{border:`2px dashed ${C.border}`,borderRadius:12,padding:"20px 16px",textAlign:"center",cursor:"pointer"}}><div style={{fontSize:24,marginBottom:6}}>📷</div><div style={{fontSize:13,color:C.muted,fontWeight:500}}>Tap to attach a business card or document</div></div>)}
+          </InfoCard>
           <button onClick={isEdit?saveEdit:addContact} disabled={!ok} style={{background:ok?C.amber:C.border,border:"none",borderRadius:14,padding:15,color:ok?"#fff":C.muted,fontSize:15,fontWeight:800,cursor:ok?"pointer":"not-allowed",boxShadow:ok?"0 4px 14px rgba(245,158,11,0.4)":"none",fontFamily:"inherit"}}>{isEdit?"Save Changes":"Add to Network"}</button>
         </div>
       </div>
@@ -525,7 +614,7 @@ export default function App() {
       <div style={{...WRAP,paddingBottom:30}}>
         <div style={{background:C.navy,padding:"14px 16px 22px",position:"sticky",top:0,zIndex:10}}>
           <NavBack onClick={backFromDetail}/>
-          <div style={{width:72,height:72,borderRadius:20,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,fontWeight:800,letterSpacing:-0.5,marginTop:14}}>{initials(dn)}</div>
+          {profilePhotos[selected.id]?(<img src={profilePhotos[selected.id]} alt="" style={{width:72,height:72,borderRadius:20,objectFit:"cover",marginTop:14,border:"3px solid rgba(255,255,255,0.3)"}}/>):(<div style={{width:72,height:72,borderRadius:20,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,fontWeight:800,letterSpacing:-0.5,marginTop:14}}>{initials(dn)}</div>)}
           <div style={{color:"#fff",fontSize:22,fontWeight:800,marginTop:10,letterSpacing:-0.5}}>{dn}</div>
           {selected.fullName&&<div style={{color:"rgba(255,255,255,0.5)",fontSize:13,marginTop:2,fontStyle:"italic"}}>{selected.fullName}</div>}
           {(selected.role||selected.company)&&<div style={{color:"#90A4C8",fontSize:13,marginTop:4}}>{[selected.role,selected.company].filter(Boolean).join(" · ")}</div>}
@@ -578,7 +667,7 @@ export default function App() {
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><NavBack onClick={()=>setTView("list")}/><button onClick={openTreeEditor} style={{background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",borderRadius:9,padding:"7px 14px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>✏️ Edit</button></div>
           <div style={{marginTop:12}}><div style={{color:"#fff",fontSize:22,fontWeight:800,letterSpacing:-0.5}}>{selTree.name}</div><div style={{marginTop:7,display:"flex",gap:6,flexWrap:"wrap"}}><MiniChip bg="rgba(255,255,255,0.15)" fg="#fff">{typeInfo.icon} {typeInfo.label}</MiniChip><MiniChip bg="rgba(255,255,255,0.1)" fg="rgba(255,255,255,0.75)">{selTree.members.length} {selTree.members.length===1?"person":"people"}</MiniChip></div></div>
         </div>
-        <div style={{padding:"12px 13px 80px"}}>{selTree.members.length===0?(<div style={{textAlign:"center",padding:"52px 24px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>🌱</div><div style={{fontSize:16,fontWeight:700,color:"#374151",marginBottom:6}}>This tree is empty</div><div style={{fontSize:13,lineHeight:1.6}}>Tap Edit to add people and define the hierarchy.</div></div>):<OrgChart members={selTree.members} contacts={contacts} onNodePress={c=>openDetail(c,"tree")}/>}</div>
+        <div style={{padding:"12px 13px 80px"}}>{selTree.members.length===0?(<div style={{textAlign:"center",padding:"52px 24px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>🌱</div><div style={{fontSize:16,fontWeight:700,color:"#374151",marginBottom:6}}>This tree is empty</div><div style={{fontSize:13,lineHeight:1.6}}>Tap Edit to add people and define the hierarchy.</div></div>):<OrgChart members={selTree.members} contacts={contacts} profilePhotos={profilePhotos} onNodePress={c=>openDetail(c,"tree")}/>}</div>
       </div>
     );
   }
@@ -610,7 +699,7 @@ export default function App() {
       <div style={{...WRAP,paddingBottom:30}}>
         <div style={{background:"#7C1D1D",padding:"14px 16px 22px",position:"sticky",top:0,zIndex:10}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><NavBack onClick={()=>setCautView("list")}/><button onClick={openCautEditor} style={{background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",borderRadius:9,padding:"7px 14px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>✏️ Edit</button></div>
-          <div style={{width:72,height:72,borderRadius:20,background:contact?gradient(dn):"#6B7280",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,fontWeight:800,letterSpacing:-0.5,marginTop:14}}>{initials(dn)}</div>
+          {(contact&&profilePhotos[contact.id])?(<img src={profilePhotos[contact.id]} alt="" style={{width:72,height:72,borderRadius:20,objectFit:"cover",marginTop:14,border:"3px solid rgba(255,255,255,0.3)"}}/>):(<div style={{width:72,height:72,borderRadius:20,background:contact?gradient(dn):"#6B7280",display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,fontWeight:800,letterSpacing:-0.5,marginTop:14}}>{initials(dn)}</div>)}
           <div style={{color:"#fff",fontSize:22,fontWeight:800,marginTop:10,letterSpacing:-0.5}}>{dn}</div>
           {contact&&(contact.role||contact.company)&&<div style={{color:"rgba(255,255,255,0.6)",fontSize:13,marginTop:3}}>{[contact.role,contact.company].filter(Boolean).join(" · ")}</div>}
           <div style={{marginTop:10}}><span style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 12px",borderRadius:999,background:level.bg,color:level.color,fontSize:13,fontWeight:800}}>{level.icon} {level.label}</span></div>
@@ -627,6 +716,7 @@ export default function App() {
   /* ════ MAIN LIST VIEWS ════ */
   return (
     <div style={{...WRAP,paddingBottom:TAB_H}}>
+      {ExportReminder}
 
       {activeTab==="network"&&(
         <div>
@@ -635,7 +725,7 @@ export default function App() {
             <div style={{background:"rgba(255,255,255,0.1)",borderRadius:10,display:"flex",alignItems:"center",padding:"0 11px",gap:7}}><span style={{fontSize:13,color:"rgba(255,255,255,0.4)"}}>🔍</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, industry, fun fact…" style={{flex:1,background:"transparent",border:"none",outline:"none",color:"#fff",fontSize:14,padding:"10px 0",fontFamily:"inherit"}}/>{search&&<span onClick={()=>setSearch("")} style={{color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:18,lineHeight:1}}>×</span>}</div>
           </div>
           <div style={{display:"flex",gap:7,padding:"11px 13px 0",overflowX:"auto",scrollbarWidth:"none"}}>{["all",...industries].map(ind=>(<button key={ind} onClick={()=>setFilter(ind)} style={{flexShrink:0,padding:"6px 13px",borderRadius:999,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",outline:"none",fontFamily:"inherit",background:filter===ind?C.navy:C.white,color:filter===ind?"#fff":C.muted,boxShadow:filter===ind?"0 2px 8px rgba(27,42,92,0.18)":"0 1px 2px rgba(0,0,0,0.07)"}}>{ind==="all"?"All":ind}</button>))}</div>
-          <div style={{padding:"8px 11px 0"}}>{sorted.length===0?(<div style={{textAlign:"center",padding:"56px 22px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>{contacts.length===0?"👋":"🔍"}</div><div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:7}}>{contacts.length===0?"Start building your network":"No one found"}</div><div style={{fontSize:13,lineHeight:1.6}}>{contacts.length===0?"Tap + to add your first contact.":"Try a different search or filter."}</div></div>):letters.map(letter=>(<div key={letter}><div style={{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1.2,padding:"10px 4px 5px",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,marginBottom:4}}>{letter}</div>{grouped[letter].map(c=>{const ctx=ctxFor(c.context,contexts);const dn=displayName(c);const caut=cautions.find(k=>k.contactId===c.id);return(<div key={c.id} onClick={()=>openDetail(c)} style={{background:C.white,borderRadius:13,marginBottom:6,padding:"13px",display:"flex",alignItems:"center",gap:11,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",cursor:"pointer",borderLeft:caut?`4px solid ${cautLevelFor(caut.level).color}`:"4px solid transparent"}}><div style={{width:48,height:48,borderRadius:13,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:16,fontWeight:800,flexShrink:0,letterSpacing:-0.5}}>{initials(dn)}</div><div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dn}</div>{(c.role||c.company)&&<div style={{fontSize:11,color:C.muted,marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.role,c.company].filter(Boolean).join(" · ")}</div>}<div style={{display:"flex",gap:5,flexWrap:"wrap"}}><MiniChip bg={ctx.bg} fg={ctx.fg}>{ctx.icon} {ctx.label}</MiniChip>{(c.industryTags||[]).slice(0,1).map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})} {(c.industryTags||[]).length>1&&<MiniChip bg="#F3F4F6" fg={C.muted}>+{c.industryTags.length-1}</MiniChip>}</div></div><span style={{color:"#D1D5DB",fontSize:18,flexShrink:0}}>›</span></div>);})}</div>))}</div>
+          <div style={{padding:"8px 11px 0"}}>{sorted.length===0?(<div style={{textAlign:"center",padding:"56px 22px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>{contacts.length===0?"👋":"🔍"}</div><div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:7}}>{contacts.length===0?"Start building your network":"No one found"}</div><div style={{fontSize:13,lineHeight:1.6}}>{contacts.length===0?"Tap + to add your first contact.":"Try a different search or filter."}</div></div>):letters.map(letter=>(<div key={letter}><div style={{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1.2,padding:"10px 4px 5px",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,marginBottom:4}}>{letter}</div>{grouped[letter].map(c=>{const ctx=ctxFor(c.context,contexts);const dn=displayName(c);const caut=cautions.find(k=>k.contactId===c.id);return(<div key={c.id} onClick={()=>openDetail(c)} style={{background:C.white,borderRadius:13,marginBottom:6,padding:"13px",display:"flex",alignItems:"center",gap:11,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",cursor:"pointer",borderLeft:caut?`4px solid ${cautLevelFor(caut.level).color}`:"4px solid transparent"}}>{profilePhotos[c.id]?(<img src={profilePhotos[c.id]} alt="" style={{width:48,height:48,borderRadius:13,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:48,height:48,borderRadius:13,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:16,fontWeight:800,flexShrink:0,letterSpacing:-0.5}}>{initials(dn)}</div>)}<div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dn}</div>{(c.role||c.company)&&<div style={{fontSize:11,color:C.muted,marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.role,c.company].filter(Boolean).join(" · ")}</div>}<div style={{display:"flex",gap:5,flexWrap:"wrap"}}><MiniChip bg={ctx.bg} fg={ctx.fg}>{ctx.icon} {ctx.label}</MiniChip>{(c.industryTags||[]).slice(0,1).map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})} {(c.industryTags||[]).length>1&&<MiniChip bg="#F3F4F6" fg={C.muted}>+{c.industryTags.length-1}</MiniChip>}</div></div><span style={{color:"#D1D5DB",fontSize:18,flexShrink:0}}>›</span></div>);})}</div>))}</div>
           <button onClick={()=>{setForm(blank(contexts[0]?.id));setIsEdit(false);setShowQInd(false);setShowQCtx(false);setView("form");}} style={{position:"fixed",bottom:TAB_H+16,right:22,width:54,height:54,borderRadius:27,background:C.amber,border:"none",color:"#fff",fontSize:30,lineHeight:"1",cursor:"pointer",boxShadow:"0 4px 16px rgba(245,158,11,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:20,fontFamily:"inherit",fontWeight:300}}>+</button>
         </div>
       )}
@@ -671,6 +761,10 @@ export default function App() {
                   <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={importData}/>
                   <button onClick={()=>importRef.current?.click()} style={{padding:"10px 14px",background:"#F3F4F6",border:"none",borderRadius:10,color:C.text,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",textAlign:"left"}}>⬆️ Import from backup</button>
                   {importStatus&&<div style={{fontSize:13,color:C.muted,padding:"4px 2px"}}>{importStatus}</div>}
+                  <div style={{fontSize:11,color:C.muted,padding:"4px 2px",display:"flex",alignItems:"center",gap:5}}>
+                    <span style={{fontSize:13}}>☁️</span>
+                    <span>{fmtSynced(lastSynced)}</span>
+                  </div>
                 </div>
               </div>
               <button onClick={()=>setIndOpen(p=>!p)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"14px 16px",background:"transparent",border:"none",borderBottom:`1px solid ${C.border}`,cursor:"pointer",fontFamily:"inherit"}}><span style={{fontSize:14,fontWeight:700,color:C.text}}>Industry</span><span style={{fontSize:11,color:C.muted,display:"inline-block",transform:indOpen?"rotate(180deg)":"rotate(0deg)",transition:"transform 0.2s"}}>▼</span></button>
