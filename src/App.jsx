@@ -157,7 +157,7 @@ async function resizeProfilePhoto(file) {
 function blank(ctxId="event") {
   return {
     nickname:"", fullName:"", role:"", company:"",
-    context:ctxId, contextNote:"", industryTags:[],
+    context:ctxId, contextNote:"", industryTags:[], industryNote:"",
     funFact:"", notes:"",
     profilePhoto:null, profilePhotoCleared:false,   // profile picture
     photo:null,        photoCleared:false,            // business card / docs
@@ -171,7 +171,7 @@ function formToContact(form, existingId) {
     nickname:form.nickname.trim(), fullName:form.fullName.trim(),
     role:form.role.trim(), company:form.company.trim(),
     context:form.context, contextNote:form.contextNote.trim(),
-    industryTags:form.industryTags||[], funFact:form.funFact.trim(),
+    industryTags:form.industryTags||[], industryNote:form.industryNote||"" , funFact:form.funFact.trim(),
     notes:form.notes.trim(),
     socials:{
       instagram:(form.socials?.instagram||"").trim(),
@@ -188,7 +188,7 @@ function contactToForm(c, photo=null, profilePhoto=null) {
     nickname:c.nickname||c.name||"", fullName:c.fullName||"",
     role:c.role||"", company:c.company||"",
     context:c.context||"event", contextNote:c.contextNote||"",
-    industryTags:c.industryTags||c.tags||[],
+    industryTags:c.industryTags||c.tags||[], industryNote:c.industryNote||"",
     funFact:c.funFact||(c.helpsWith||[]).join(", ")||"",
     notes:c.notes||"",
     profilePhoto, profilePhotoCleared:false,
@@ -662,8 +662,8 @@ export default function App() {
             <FL>Nickname *</FL>
             <input value={fv("nickname")} onChange={sf("nickname")} placeholder="What do you call them?" style={{...INP,marginBottom:10}}/>
             <Hr/>
-            <FL>Full Name</FL>
-            <input value={fv("fullName")} onChange={sf("fullName")} placeholder="Optional — legal / formal name" style={INP}/>
+            <FL>Highlight</FL>
+            <input value={fv("fullName")} onChange={sf("fullName")} placeholder="One sentence that captures who they are…" style={INP}/>
           </InfoCard>
 
           {/* Role / Company */}
@@ -706,6 +706,12 @@ export default function App() {
                 <button key={ind} onClick={()=>toggleInd(ind)} style={{padding:"6px 12px",borderRadius:999,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit",border:`2px solid ${sel?col.fg:C.border}`,background:sel?col.bg:"transparent",color:sel?col.fg:C.muted}}>{ind}</button>
               );})}
             </div>
+            {((fv("industryTags")||[]).length>0||(fv("industryNote")||""))&&(
+              <div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+                <div style={{fontSize:10,fontWeight:800,color:C.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>Industry Details</div>
+                <input value={fv("industryNote")||""} onChange={sf("industryNote")} placeholder="e.g. B2B wholesale, luxury retail, import/export…" style={INP}/>
+              </div>
+            )}
           </InfoCard>
 
           {/* Fun Fact / Notes */}
@@ -802,17 +808,17 @@ export default function App() {
             <div style={{width:72,height:72,borderRadius:20,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,fontWeight:800,letterSpacing:-0.5,marginTop:14}}>{initials(dn)}</div>
           )}
           <div style={{color:"#fff",fontSize:22,fontWeight:800,marginTop:10,letterSpacing:-0.5}}>{dn}</div>
-          {selected.fullName&&<div style={{color:"rgba(255,255,255,0.5)",fontSize:13,marginTop:2,fontStyle:"italic"}}>{selected.fullName}</div>}
           {(selected.role||selected.company)&&<div style={{color:"#90A4C8",fontSize:13,marginTop:4}}>{[selected.role,selected.company].filter(Boolean).join(" · ")}</div>}
+          {selected.fullName&&<div style={{color:"rgba(255,255,255,0.8)",fontSize:13,marginTop:6,lineHeight:1.55,fontStyle:"italic"}}>"{selected.fullName}"</div>}
           <div style={{marginTop:10,display:"flex",gap:6,flexWrap:"wrap"}}>
             <MiniChip bg="rgba(255,255,255,0.15)" fg="#fff">{ctx.icon} {ctx.label}</MiniChip>
             {selected.contextNote&&<MiniChip bg="rgba(255,255,255,0.1)" fg="rgba(255,255,255,0.75)">{selected.contextNote}</MiniChip>}
           </div>
         </div>
         <div style={{padding:"12px 13px",display:"flex",flexDirection:"column",gap:9}}>
-          {(selected.industryTags||[]).length>0&&(<InfoCard><FL>Industry</FL><div style={{display:"flex",flexWrap:"wrap",gap:6}}>{selected.industryTags.map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})}</div></InfoCard>)}
-          {selected.funFact&&<InfoCard><FL>Fun Fact / Notes</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6}}>{selected.funFact}</div></InfoCard>}
-          {selected.notes&&<InfoCard><FL>Insecurity / Weakness</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6}}>{selected.notes}</div></InfoCard>}
+          {((selected.industryTags||[]).length>0||selected.industryNote)&&(<InfoCard><FL>Industry</FL><div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:(selected.industryNote?8:0)}}>{(selected.industryTags||[]).map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})}</div>{selected.industryNote&&<div style={{fontSize:13,color:C.muted,lineHeight:1.55}}>{selected.industryNote}</div>}</InfoCard>)}
+          {selected.funFact&&<InfoCard><FL>Fun Fact / Notes</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selected.funFact}</div></InfoCard>}
+          {selected.notes&&<InfoCard><FL>Insecurity / Weakness</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selected.notes}</div></InfoCard>}
           {SOCIALS.some(p=>selected.socials?.[p.id])&&(<InfoCard><FL>Social Media</FL><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{SOCIALS.filter(p=>selected.socials?.[p.id]).map(p=>{const url=socialUrl(p.id,selected.socials[p.id]);return(<button key={p.id} onClick={()=>url&&window.open(url,"_blank")} style={{display:"flex",alignItems:"center",gap:7,padding:"9px 16px",borderRadius:10,border:"none",background:p.grad,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 6px rgba(0,0,0,0.15)"}}><span style={{fontSize:11,fontWeight:900,background:"rgba(255,255,255,0.25)",borderRadius:5,padding:"1px 5px"}}>{p.abbr}</span>{p.label}</button>);})}</div></InfoCard>)}
           {selPhoto&&<InfoCard style={{padding:0,overflow:"hidden"}}><img src={selPhoto} alt="" style={{width:"100%",borderRadius:14,display:"block",objectFit:"contain",maxHeight:340}}/></InfoCard>}
           {detailOrigin==="network"&&(!delConfirm?(
@@ -940,8 +946,8 @@ export default function App() {
           <div style={{marginTop:10}}><span style={{display:"inline-flex",alignItems:"center",gap:6,padding:"5px 12px",borderRadius:999,background:level.bg,color:level.color,fontSize:13,fontWeight:800}}>{level.icon} {level.label}</span></div>
         </div>
         <div style={{padding:"12px 13px",display:"flex",flexDirection:"column",gap:9}}>
-          {selCaut.whatTheyDid&&<InfoCard><FL>What They Did</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6}}>{selCaut.whatTheyDid}</div></InfoCard>}
-          {selCaut.whyCautious&&<InfoCard><FL>Why Be Cautious</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6}}>{selCaut.whyCautious}</div></InfoCard>}
+          {selCaut.whatTheyDid&&<InfoCard><FL>What They Did</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selCaut.whatTheyDid}</div></InfoCard>}
+          {selCaut.whyCautious&&<InfoCard><FL>Why Be Cautious</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selCaut.whyCautious}</div></InfoCard>}
           {contact&&<button onClick={()=>openDetail(contact,"caut")} style={{padding:13,background:C.navy,border:"none",borderRadius:13,fontSize:14,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"inherit"}}>View Full Profile →</button>}
         </div>
       </div>
