@@ -217,6 +217,7 @@ export default function App(){
   const [selOth,       setSelOth]       =useState(null);
   const [editOth,      setEditOth]      =useState(null);
   const [othDelCfm,    setOthDelCfm]    =useState(false);
+  const [zoomedImg,    setZoomedImg]    =useState(null);
   /* Global */
   const [activeTab,    setActiveTab]    =useState("network");
   const [ready,        setReady]        =useState(false);
@@ -336,7 +337,7 @@ export default function App(){
   /* ── Contact CRUD ── */
   const openDetail=(c,origin="network")=>{setSelected(c);setDelConfirm(false);setDetailOrigin(origin);setView("detail");try{setSelPhoto(localStorage.getItem(PHOTO_PREFIX+c.id)||null);}catch(_){setSelPhoto(null);}};
   const openEdit=useCallback(()=>{const photo=localStorage.getItem(PHOTO_PREFIX+selected.id)||null;const profilePhoto=profilePhotos[selected.id]||null;setForm(contactToForm(selected,photo,profilePhoto));setIsEdit(true);setView("form");},[selected,profilePhotos]);
-  const backFromDetail=()=>{setDelConfirm(false);setView("list");if(detailOrigin==="tree")setActiveTab("trees");else if(detailOrigin==="connect")setActiveTab("connect");setDetailOrigin("network");};
+  const backFromDetail=()=>{setDelConfirm(false);setView("list");setZoomedImg(null);if(detailOrigin==="tree")setActiveTab("trees");else if(detailOrigin==="connect")setActiveTab("connect");setDetailOrigin("network");};
   const addContact=()=>{if(!fv("nickname").trim())return;const c=formToContact(form);const updated=[c,...contacts];persist(updated);if(form.profilePhoto){try{localStorage.setItem(PROFILE_PREFIX+c.id,form.profilePhoto);setProfilePhotos(p=>({...p,[c.id]:form.profilePhoto}));}catch(_){}}if(form.photo){try{localStorage.setItem(PHOTO_PREFIX+c.id,form.photo);}catch(_){}}setForm(blank(contexts[0]?.id));setShowQInd(false);setShowQCtx(false);setView("list");};
   const saveEdit=()=>{if(!fv("nickname").trim())return;const c=formToContact(form,selected.id);const updated=contacts.map(x=>x.id===selected.id?c:x);persist(updated);if(form.profilePhoto&&!form.profilePhotoCleared){try{localStorage.setItem(PROFILE_PREFIX+selected.id,form.profilePhoto);setProfilePhotos(p=>({...p,[selected.id]:form.profilePhoto}));}catch(_){}}else if(form.profilePhotoCleared){try{localStorage.removeItem(PROFILE_PREFIX+selected.id);setProfilePhotos(p=>{const n={...p};delete n[selected.id];return n;});}catch(_){}}if(form.photo){try{localStorage.setItem(PHOTO_PREFIX+selected.id,form.photo);}catch(_){}}else if(form.photoCleared){try{localStorage.removeItem(PHOTO_PREFIX+selected.id);}catch(_){}}setSelected(updated.find(x=>x.id===selected.id));setSelPhoto(form.photoCleared?null:(form.photo||selPhoto||null));setView("detail");};
   const removeContact=()=>{const updated=contacts.filter(c=>c.id!==selected.id);persist(updated);try{localStorage.removeItem(PHOTO_PREFIX+selected.id);}catch(_){}try{localStorage.removeItem(PROFILE_PREFIX+selected.id);setProfilePhotos(p=>{const n={...p};delete n[selected.id];return n;});}catch(_){}setDelConfirm(false);setView("list");};
@@ -449,7 +450,7 @@ export default function App(){
     return(<div style={{...WRAP,paddingBottom:30}}>
       <div style={{background:C.navy,padding:"14px 16px 22px",position:"sticky",top:0,zIndex:10}}>
         <NavBack onClick={backFromDetail}/>
-        {pp?(<img src={pp} alt="" style={{width:72,height:72,borderRadius:20,objectFit:"cover",marginTop:14,border:"3px solid rgba(255,255,255,0.3)"}}/>):(<div style={{width:72,height:72,borderRadius:20,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,fontWeight:800,letterSpacing:-0.5,marginTop:14}}>{initials(dn)}</div>)}
+        {pp?(<img src={pp} alt="" onClick={()=>setZoomedImg(pp)} style={{width:72,height:72,borderRadius:20,objectFit:"cover",marginTop:14,border:"3px solid rgba(255,255,255,0.3)",cursor:"pointer"}}/>):(<div style={{width:72,height:72,borderRadius:20,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:24,fontWeight:800,letterSpacing:-0.5,marginTop:14}}>{initials(dn)}</div>)}
         <div style={{color:"#fff",fontSize:22,fontWeight:800,marginTop:10,letterSpacing:-0.5}}>{dn}</div>
         {(selected.role||selected.company)&&<div style={{color:"#90A4C8",fontSize:13,marginTop:4}}>{[selected.role,selected.company].filter(Boolean).join(" · ")}</div>}
         {selected.fullName&&<div style={{color:"rgba(255,255,255,0.8)",fontSize:13,marginTop:6,lineHeight:1.55,fontStyle:"italic"}}>"{selected.fullName}"</div>}
@@ -460,9 +461,15 @@ export default function App(){
         {selected.funFact&&<InfoCard><FL>Fun Fact / Notes</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selected.funFact}</div></InfoCard>}
         {selected.notes&&<InfoCard><FL>Insecurity / Weakness</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selected.notes}</div></InfoCard>}
         {SOCIALS.some(p=>selected.socials?.[p.id])&&(<InfoCard><FL>Social Media & Contact</FL><div style={{display:"flex",gap:8,flexWrap:"wrap"}}>{SOCIALS.filter(p=>selected.socials?.[p.id]).map(p=>{const url=socialUrl(p.id,selected.socials[p.id]);const isFbig=p.id==="fbig";const isInsta=isFbig&&((selected.socials[p.id]||"").toLowerCase().includes("instagram")||!(selected.socials[p.id]||"").toLowerCase().includes("facebook"));return(<button key={p.id} onClick={()=>url&&window.open(url,"_blank")} style={{display:"flex",alignItems:"center",gap:7,padding:"9px 16px",borderRadius:10,border:"none",background:isFbig?(isInsta?"linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)":"#1877F2"):p.grad,color:"#fff",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 2px 6px rgba(0,0,0,0.15)"}}><span style={{fontSize:p.id==="phone"?16:11,fontWeight:900,background:"rgba(255,255,255,0.25)",borderRadius:5,padding:"1px 6px"}}>{isFbig?(isInsta?"IG":"f"):p.abbr}</span>{isFbig?(isInsta?"Instagram":"Facebook"):p.label}</button>);})}</div></InfoCard>)}
-        {selPhoto&&<InfoCard style={{padding:0,overflow:"hidden"}}><img src={selPhoto} alt="" style={{width:"100%",borderRadius:14,display:"block",objectFit:"contain",maxHeight:340}}/></InfoCard>}
+        {selPhoto&&<InfoCard style={{padding:0,overflow:"hidden"}}><img src={selPhoto} alt="" onClick={()=>setZoomedImg(selPhoto)} style={{width:"100%",borderRadius:14,display:"block",objectFit:"contain",maxHeight:340,cursor:"zoom-in"}}/></InfoCard>}
         {detailOrigin==="network"&&(!delConfirm?(<div style={{display:"flex",gap:9,marginTop:2}}><button onClick={openEdit} style={{flex:1,padding:13,border:`2px solid ${C.navy}`,background:"transparent",borderRadius:13,fontSize:15,fontWeight:700,color:C.navy,cursor:"pointer",fontFamily:"inherit"}}>Edit</button><button onClick={()=>setDelConfirm(true)} style={{flex:1,padding:13,border:"none",background:C.redBg,borderRadius:13,fontSize:15,fontWeight:700,color:C.red,cursor:"pointer",fontFamily:"inherit"}}>Remove</button></div>):(<InfoCard style={{border:`1px solid ${C.redBg}`}}><div style={{fontSize:14,fontWeight:600,color:C.text,marginBottom:12,textAlign:"center"}}>Remove {dn} from your network?</div><div style={{display:"flex",gap:9}}><button onClick={()=>setDelConfirm(false)} style={{flex:1,padding:11,border:`1px solid ${C.border}`,background:"transparent",borderRadius:11,fontSize:14,fontWeight:600,color:C.muted,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button><button onClick={removeContact} style={{flex:1,padding:11,border:"none",background:C.red,borderRadius:11,fontSize:14,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"inherit"}}>Yes, Remove</button></div></InfoCard>))}
       </div>
+    {zoomedImg&&(
+      <div onClick={()=>setZoomedImg(null)} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.93)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+        <button onClick={e=>{e.stopPropagation();setZoomedImg(null);}} style={{position:"absolute",top:20,right:20,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",borderRadius:"50%",width:40,height:40,fontSize:22,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>×</button>
+        <img src={zoomedImg} alt="" onClick={e=>e.stopPropagation()} style={{maxWidth:"100%",maxHeight:"88vh",objectFit:"contain",borderRadius:10}}/>
+      </div>
+    )}
     </div>);
   }
 
