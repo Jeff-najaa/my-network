@@ -98,7 +98,7 @@ async function resizePP(file){return new Promise(resolve=>{const r=new FileReade
 function blank(ctxId="event"){return{nickname:"",fullName:"",role:"",company:"",context:ctxId,contextNote:"",industryTags:[],industryNote:"",funFact:"",notes:"",profilePhoto:null,profilePhotoCleared:false,photo:null,photoCleared:false,socials:{phone:"",fbig:"",line:""}};}
 function formToContact(form,existingId){return{id:existingId||uid(),nickname:form.nickname.trim(),fullName:form.fullName.trim(),role:form.role.trim(),company:form.company.trim(),context:form.context,contextNote:form.contextNote.trim(),industryTags:form.industryTags||[],industryNote:form.industryNote||"",funFact:form.funFact.trim(),notes:form.notes.trim(),socials:{phone:(form.socials?.phone||"").trim(),fbig:(form.socials?.fbig||"").trim(),line:(form.socials?.line||"").trim()},addedAt:existingId?undefined:new Date().toISOString()};}
 function contactToForm(c,photo=null,profilePhoto=null){return{nickname:c.nickname||c.name||"",fullName:c.fullName||"",role:c.role||"",company:c.company||"",context:c.context||"event",contextNote:c.contextNote||"",industryTags:c.industryTags||c.tags||[],industryNote:c.industryNote||"",funFact:c.funFact||(c.helpsWith||[]).join(", ")||"",notes:c.notes||"",profilePhoto,profilePhotoCleared:false,photo,photoCleared:false,socials:{phone:c.socials?.phone||"",fbig:c.socials?.fbig||c.socials?.instagram||c.socials?.facebook||"",line:c.socials?.line||""}};}
-function blankOth(type="gift"){return{name:"",description:"",store:"",priceRange:"500",photo:null,photoCleared:false,type};}
+function blankOth(type="gift"){return{name:"",description:"",store:"",url:"",priceRange:"500",photo:null,photoCleared:false,type};}
 
 /* ─── UI ATOMS ───────────────────────────────────────────────────── */
 function FL({children}){return <div style={{fontSize:10,fontWeight:800,color:C.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:7}}>{children}</div>;}
@@ -543,7 +543,7 @@ export default function App(){
       <div style={{padding:"12px 13px 20px",display:"flex",flexDirection:"column",gap:9}}>
         <InfoCard><FL>{isGift?"Gift Name *":"Handout Name *"}</FL><input value={eo.name} onChange={e=>setEditOth(p=>({...p,name:e.target.value}))} placeholder={isGift?"e.g. Artisan Coffee Beans, Silk Scarf…":"e.g. Company Tote Bag, Branded Pen Set…"} style={INP}/></InfoCard>
         <InfoCard><FL>Short Description</FL><textarea value={eo.description||""} onChange={e=>setEditOth(p=>({...p,description:e.target.value}))} rows={2} placeholder={isGift?"Who would this suit? Any special notes…":"What is it? Any special notes…"} style={{...INP,resize:"none",lineHeight:1.55}}/></InfoCard>
-        <InfoCard><FL>Store / Brand</FL><input value={eo.store||""} onChange={e=>setEditOth(p=>({...p,store:e.target.value}))} placeholder={isGift?"e.g. Blue Bottle Coffee, Erewhon…":"e.g. Company store, Vendor name…"} style={INP}/></InfoCard>
+        <InfoCard><FL>Store / Brand</FL><input value={eo.store||""} onChange={e=>setEditOth(p=>({...p,store:e.target.value}))} placeholder={isGift?"e.g. Blue Bottle Coffee, Erewhon…":"e.g. Company store, Vendor name…"} style={{...INP,marginBottom:10}}/><Hr/><FL>Link / URL</FL><input value={eo.url||""} onChange={e=>setEditOth(p=>({...p,url:e.target.value}))} placeholder="https://www.store.com/product…" style={INP}/></InfoCard>
         <InfoCard>
           <FL>Price Range</FL>
           <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
@@ -581,7 +581,7 @@ export default function App(){
       </div>
       <div style={{padding:"12px 13px",display:"flex",flexDirection:"column",gap:9}}>
         {photo&&<InfoCard style={{padding:0,overflow:"hidden"}}><img src={photo} alt="" style={{width:"100%",borderRadius:14,display:"block",objectFit:"cover",maxHeight:280}}/></InfoCard>}
-        {selOth.description&&<InfoCard><FL>Description</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selOth.description}</div></InfoCard>}
+        {selOth.description&&<InfoCard><FL>Description</FL><div style={{fontSize:15,color:C.text,lineHeight:1.6,whiteSpace:"pre-wrap"}}>{selOth.description}</div></InfoCard>}{(selOth.store||selOth.url)&&(<InfoCard>{selOth.store&&<div style={{fontSize:14,color:C.muted,fontWeight:600,marginBottom:selOth.url?10:0}}>🏪 {selOth.store}</div>}{selOth.url&&<button onClick={()=>window.open(selOth.url.startsWith("http")?selOth.url:`https://${selOth.url}`,"_blank")} style={{width:"100%",padding:12,background:C.navy,border:"none",borderRadius:11,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>🔗 Visit Link</button>}</InfoCard>)}
       </div>
     </div>);
   }
@@ -665,20 +665,24 @@ export default function App(){
               <div style={{fontSize:13,lineHeight:1.7}}>Tap + to add {isGift?"a gift idea you want to remember":"a handout item for reference"}.</div>
             </div>
           );
-          return items.map(item=>{
-            const pr=priceFor(item.priceRange);const photo=othPhotos[item.id];
-            return(<div key={item.id} onClick={()=>openOthDetail(item)} style={{background:C.white,borderRadius:14,marginBottom:10,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",cursor:"pointer"}}>
-              {photo&&<div style={{height:150,overflow:"hidden"}}><img src={photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/></div>}
-              <div style={{padding:"12px 14px"}}>
-                <div style={{fontSize:15,fontWeight:800,color:C.text,marginBottom:4}}>{item.name}</div>
-                {item.description&&<div style={{fontSize:12,color:C.muted,marginBottom:8,lineHeight:1.5}}>{item.description}</div>}
-                <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                  {item.store&&<MiniChip bg="#F3F4F6" fg={C.muted}>{item.store}</MiniChip>}
-                  <span style={{display:"inline-flex",alignItems:"center",padding:"3px 9px",borderRadius:999,fontSize:11,fontWeight:700,background:pr.bg,color:pr.fg}}>{pr.label}</span>
-                </div>
-              </div>
-            </div>);
-          });
+          return(
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+              {items.map(item=>{
+                const pr=priceFor(item.priceRange);const photo=othPhotos[item.id];
+                return(
+                  <div key={item.id} onClick={()=>openOthDetail(item)} style={{background:C.white,borderRadius:14,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.06)",cursor:"pointer",display:"flex",flexDirection:"column"}}>
+                    <div style={{aspectRatio:"1",overflow:"hidden",background:isGift?"#FEF9EB":"#EFF4FF",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      {photo?(<img src={photo} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>):(<span style={{fontSize:40}}>{isGift?"🎁":"📦"}</span>)}
+                    </div>
+                    <div style={{padding:"9px 10px 11px"}}>
+                      <div style={{fontSize:13,fontWeight:800,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:5}}>{item.name}</div>
+                      <span style={{display:"inline-flex",alignItems:"center",padding:"3px 8px",borderRadius:999,fontSize:10,fontWeight:700,background:pr.bg,color:pr.fg}}>{pr.label}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
         })()}
       </div>
       <button onClick={()=>startNewOth(othSubTab.slice(0,-1))} style={{position:"fixed",bottom:TAB_H+16,right:22,width:54,height:54,borderRadius:27,background:"#1E1B4B",border:"none",color:"#fff",fontSize:30,lineHeight:"1",cursor:"pointer",boxShadow:"0 4px 16px rgba(30,27,75,0.45)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:20,fontFamily:"inherit",fontWeight:300}}>+</button>
