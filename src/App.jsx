@@ -239,6 +239,7 @@ export default function App(){
   const profilePhotoRef =useRef(null);
   const othPhotoRef     =useRef(null);
   const importRef       =useRef(null);
+  const alphaStripRef   =useRef(null);
 
   /* ── Startup ── */
   useEffect(()=>{
@@ -380,6 +381,21 @@ export default function App(){
   const sorted=contacts.filter(c=>{const q=search.toLowerCase();const matchQ=!q||[displayName(c),c.fullName,c.role,c.company,c.contextNote,c.funFact,...(c.industryTags||[]),c.socials?.fbig,c.socials?.line].some(v=>(v||"").toLowerCase().includes(q));return matchQ&&(filter==="all"||(c.industryTags||[]).includes(filter));}).sort((a,b)=>displayName(a).localeCompare(displayName(b)));
   const grouped={};sorted.forEach(c=>{const l=(displayName(c)[0]||"#").toUpperCase();(grouped[l]=grouped[l]||[]).push(c);});
   const letters=Object.keys(grouped).sort();
+
+  const scrollToLetter=(letter)=>{
+    const el=document.getElementById(`alpha-${letter}`);
+    if(el) el.scrollIntoView({behavior:"smooth",block:"start"});
+  };
+  const handleAlphaTouch=(e)=>{
+    e.preventDefault();
+    const strip=alphaStripRef.current;
+    if(!strip||!letters.length)return;
+    const touch=e.touches[0];
+    const rect=strip.getBoundingClientRect();
+    const y=Math.max(0,touch.clientY-rect.top);
+    const idx=Math.min(letters.length-1,Math.floor(y/(rect.height/letters.length)));
+    scrollToLetter(letters[idx]);
+  };
 
   const WRAP={fontFamily:"-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif",background:C.bg,minHeight:"100vh",maxWidth:480,margin:"0 auto"};
   if(!ready)return <div style={{...WRAP,display:"flex",alignItems:"center",justifyContent:"center",height:"100vh"}}><div style={{color:C.muted,fontSize:15}}>Loading…</div></div>;
@@ -622,7 +638,20 @@ export default function App(){
         <div style={{background:"rgba(255,255,255,0.1)",borderRadius:10,display:"flex",alignItems:"center",padding:"0 11px",gap:7}}><span style={{fontSize:13,color:"rgba(255,255,255,0.4)"}}>🔍</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, industry, fun fact…" style={{flex:1,background:"transparent",border:"none",outline:"none",color:"#fff",fontSize:14,padding:"10px 0",fontFamily:"inherit"}}/>{search&&<span onClick={()=>setSearch("")} style={{color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:18,lineHeight:1}}>×</span>}</div>
       </div>
       <div style={{display:"flex",gap:7,padding:"11px 13px 0",overflowX:"auto",scrollbarWidth:"none"}}>{["all",...industries].map(ind=>(<button key={ind} onClick={()=>setFilter(ind)} style={{flexShrink:0,padding:"6px 13px",borderRadius:999,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",outline:"none",fontFamily:"inherit",background:filter===ind?C.navy:C.white,color:filter===ind?"#fff":C.muted,boxShadow:filter===ind?"0 2px 8px rgba(27,42,92,0.18)":"0 1px 2px rgba(0,0,0,0.07)"}}>{ind==="all"?"All":ind}</button>))}</div>
-      <div style={{padding:"8px 11px 0"}}>{sorted.length===0?(<div style={{textAlign:"center",padding:"56px 22px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>{contacts.length===0?"👋":"🔍"}</div><div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:7}}>{contacts.length===0?"Start building your network":"No one found"}</div><div style={{fontSize:13,lineHeight:1.6}}>{contacts.length===0?"Tap + to add your first contact.":"Try a different search or filter."}</div></div>):letters.map(letter=>(<div key={letter}><div style={{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1.2,padding:"10px 4px 5px",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,marginBottom:4}}>{letter}</div>{grouped[letter].map(c=>{const ctx=ctxFor(c.context,contexts);const dn=displayName(c);const pp=profilePhotos[c.id];return(<div key={c.id} onClick={()=>openDetail(c)} style={{background:C.white,borderRadius:13,marginBottom:6,padding:"13px",display:"flex",alignItems:"center",gap:11,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",cursor:"pointer"}}>{pp?(<img src={pp} alt="" style={{width:48,height:48,borderRadius:13,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:48,height:48,borderRadius:13,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:16,fontWeight:800,flexShrink:0,letterSpacing:-0.5}}>{initials(dn)}</div>)}<div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dn}</div>{(c.role||c.company)&&<div style={{fontSize:11,color:C.muted,marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.role,c.company].filter(Boolean).join(" · ")}</div>}<div style={{display:"flex",gap:5,flexWrap:"wrap"}}><MiniChip bg={ctx.bg} fg={ctx.fg}>{ctx.icon} {ctx.label}</MiniChip>{(c.industryTags||[]).slice(0,1).map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})} {(c.industryTags||[]).length>1&&<MiniChip bg="#F3F4F6" fg={C.muted}>+{c.industryTags.length-1}</MiniChip>}</div></div><span style={{color:"#D1D5DB",fontSize:18,flexShrink:0}}>›</span></div>);})}</div>))}</div>
+      <div style={{padding:"8px 11px 0"}}>{sorted.length===0?(<div style={{textAlign:"center",padding:"56px 22px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>{contacts.length===0?"👋":"🔍"}</div><div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:7}}>{contacts.length===0?"Start building your network":"No one found"}</div><div style={{fontSize:13,lineHeight:1.6}}>{contacts.length===0?"Tap + to add your first contact.":"Try a different search or filter."}</div></div>):letters.map(letter=>(<div key={letter}><div id={`alpha-${letter}`} style={{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1.2,padding:"10px 4px 5px",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,marginBottom:4}}>{letter}</div>{grouped[letter].map(c=>{const ctx=ctxFor(c.context,contexts);const dn=displayName(c);const pp=profilePhotos[c.id];return(<div key={c.id} onClick={()=>openDetail(c)} style={{background:C.white,borderRadius:13,marginBottom:6,padding:"13px",display:"flex",alignItems:"center",gap:11,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",cursor:"pointer"}}>{pp?(<img src={pp} alt="" style={{width:48,height:48,borderRadius:13,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:48,height:48,borderRadius:13,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:16,fontWeight:800,flexShrink:0,letterSpacing:-0.5}}>{initials(dn)}</div>)}<div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dn}</div>{(c.role||c.company)&&<div style={{fontSize:11,color:C.muted,marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.role,c.company].filter(Boolean).join(" · ")}</div>}<div style={{display:"flex",gap:5,flexWrap:"wrap"}}><MiniChip bg={ctx.bg} fg={ctx.fg}>{ctx.icon} {ctx.label}</MiniChip>{(c.industryTags||[]).slice(0,1).map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})} {(c.industryTags||[]).length>1&&<MiniChip bg="#F3F4F6" fg={C.muted}>+{c.industryTags.length-1}</MiniChip>}</div></div><span style={{color:"#D1D5DB",fontSize:18,flexShrink:0}}>›</span></div>);})}</div>))}</div>
+      {letters.length>1&&(
+        <div ref={alphaStripRef}
+          style={{position:"fixed",right:6,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",alignItems:"center",zIndex:30,background:"rgba(255,255,255,0.92)",borderRadius:12,padding:"5px 3px",boxShadow:"0 2px 10px rgba(0,0,0,0.13)",userSelect:"none",WebkitUserSelect:"none",touchAction:"none",maxHeight:`calc(100vh - ${TAB_H+100}px)`,overflowY:"auto"}}
+          onTouchStart={handleAlphaTouch}
+          onTouchMove={handleAlphaTouch}>
+          {letters.map(l=>(
+            <div key={l} onClick={()=>scrollToLetter(l)}
+              style={{width:20,height:18,display:"flex",alignItems:"center",justifyContent:"center",fontSize:10,fontWeight:800,color:C.navy,cursor:"pointer",borderRadius:4,lineHeight:1}}>
+              {l}
+            </div>
+          ))}
+        </div>
+      )}
       <button onClick={()=>{setForm(blank(contexts[0]?.id));setIsEdit(false);setShowQInd(false);setShowQCtx(false);setView("form");}} style={{position:"fixed",bottom:TAB_H+16,right:22,width:54,height:54,borderRadius:27,background:C.amber,border:"none",color:"#fff",fontSize:30,lineHeight:"1",cursor:"pointer",boxShadow:"0 4px 16px rgba(245,158,11,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:20,fontFamily:"inherit",fontWeight:300}}>+</button>
     </div>)}
 
