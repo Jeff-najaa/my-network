@@ -8,6 +8,7 @@ async function saveCloud(pin,payload){try{const r=await fetch(`${SB_URL}/rest/v1
 
 /* ─── STORAGE ───────────────────────────────────────────────────── */
 const PHOTO_PREFIX   = "nw-photo-";
+const TN_PHOTO_PFX   = "nw-tn-";
 const PROFILE_PREFIX = "nw-pp-";
 const OTH_PHOTO_PFX  = "nw-oth-";
 const CACHE_KEY      = "nw-cache";
@@ -95,9 +96,11 @@ async function resizeImg(file,max=900){return new Promise(resolve=>{const r=new 
 async function resizePP(file){return new Promise(resolve=>{const r=new FileReader();r.onload=e=>{const img=new Image();img.onload=()=>{const SIZE=240,s=Math.min(img.width,img.height),sx=(img.width-s)/2,sy=(img.height-s)/2;const cv=document.createElement("canvas");cv.width=SIZE;cv.height=SIZE;cv.getContext("2d").drawImage(img,sx,sy,s,s,0,0,SIZE,SIZE);resolve(cv.toDataURL("image/jpeg",0.65));};img.src=e.target.result;};r.readAsDataURL(file);});}
 
 /* ─── DATA HELPERS ───────────────────────────────────────────────── */
-function blank(ctxId="event"){return{nickname:"",fullName:"",role:"",company:"",context:ctxId,contextNote:"",industryTags:[],industryNote:"",funFact:"",notes:"",profilePhoto:null,profilePhotoCleared:false,photo:null,photoCleared:false,socials:{phone:"",fbig:"",line:""}};}
-function formToContact(form,existingId){return{id:existingId||uid(),nickname:form.nickname.trim(),fullName:form.fullName.trim(),role:form.role.trim(),company:form.company.trim(),context:form.context,contextNote:form.contextNote.trim(),industryTags:form.industryTags||[],industryNote:form.industryNote||"",funFact:form.funFact.trim(),notes:form.notes.trim(),socials:{phone:(form.socials?.phone||"").trim(),fbig:(form.socials?.fbig||"").trim(),line:(form.socials?.line||"").trim()},addedAt:existingId?undefined:new Date().toISOString()};}
-function contactToForm(c,photo=null,profilePhoto=null){return{nickname:c.nickname||c.name||"",fullName:c.fullName||"",role:c.role||"",company:c.company||"",context:c.context||"event",contextNote:c.contextNote||"",industryTags:c.industryTags||c.tags||[],industryNote:c.industryNote||"",funFact:c.funFact||(c.helpsWith||[]).join(", ")||"",notes:c.notes||"",profilePhoto,profilePhotoCleared:false,photo,photoCleared:false,socials:{phone:c.socials?.phone||"",fbig:c.socials?.fbig||c.socials?.instagram||c.socials?.facebook||"",line:c.socials?.line||""}};}
+const FLAGS=[{id:"green",emoji:"🟢"},{id:"yellow",emoji:"🟡"},{id:"red",emoji:"🔴"}];
+const FLAG_EMOJI={green:"🟢",yellow:"🟡",red:"🔴"};
+function blank(ctxId="event"){return{nickname:"",fullName:"",role:"",company:"",context:ctxId,contextNote:"",industryTags:[],industryNote:"",funFact:"",notes:"",flag:null,profilePhoto:null,profilePhotoCleared:false,photo:null,photoCleared:false,socials:{phone:"",fbig:"",line:""}};}
+function formToContact(form,existingId){return{id:existingId||uid(),nickname:form.nickname.trim(),fullName:form.fullName.trim(),role:form.role.trim(),company:form.company.trim(),context:form.context,contextNote:form.contextNote.trim(),industryTags:form.industryTags||[],industryNote:form.industryNote||"",funFact:form.funFact.trim(),notes:form.notes.trim(),flag:form.flag||null,socials:{phone:(form.socials?.phone||"").trim(),fbig:(form.socials?.fbig||"").trim(),line:(form.socials?.line||"").trim()},addedAt:existingId?undefined:new Date().toISOString()};}
+function contactToForm(c,photo=null,profilePhoto=null){return{nickname:c.nickname||c.name||"",fullName:c.fullName||"",role:c.role||"",company:c.company||"",context:c.context||"event",contextNote:c.contextNote||"",industryTags:c.industryTags||c.tags||[],industryNote:c.industryNote||"",funFact:c.funFact||(c.helpsWith||[]).join(", ")||"",notes:c.notes||"",flag:c.flag||null,profilePhoto,profilePhotoCleared:false,photo,photoCleared:false,socials:{phone:c.socials?.phone||"",fbig:c.socials?.fbig||c.socials?.instagram||c.socials?.facebook||"",line:c.socials?.line||""}};}
 function blankOth(type="gift"){return{name:"",description:"",store:"",url:"",priceRange:"500",photo:null,photoCleared:false,type};}
 
 /* ─── UI ATOMS ───────────────────────────────────────────────────── */
@@ -144,27 +147,34 @@ function TabBar({active,onChange}){
 }
 
 /* ─── ORG CHART ─────────────────────────────────────────────────── */
-function OrgChart({members,contacts,profilePhotos,onNodePress}){
-  if(!members||members.length===0)return null;
-  const NW=118,NH=72,HG=16,VG=50,PAD=20,pp=profilePhotos||{};
-  const childOf={};members.forEach(m=>{const pid=m.parentMemberId||"__root__";(childOf[pid]=childOf[pid]||[]).push(m.id);});
+const nid  =()=>`n${Date.now()}${Math.random().toString(36).slice(2,5)}`;
+function countDesc(nodeId,nodes){const ch=(nodes||[]).filter(n=>n.parentId===nodeId);return ch.reduce((s,c)=>s+1+countDesc(c.id,nodes),0);}
+function getAllDesc(nodeId,nodes){const ch=(nodes||[]).filter(n=>n.parentId===nodeId);return ch.flatMap(c=>[c,...getAllDesc(c.id,nodes)]);}
+function isDescOf(checkId,ancestorId,nodes){if(!checkId||!ancestorId)return false;const node=(nodes||[]).find(n=>n.id===checkId);if(!node||!node.parentId)return false;if(node.parentId===ancestorId)return true;return isDescOf(node.parentId,ancestorId,nodes);}
+
+function OrgChart({nodes,tnPhotos,onNodePress}){
+  if(!nodes||nodes.length===0)return null;
+  const pp=tnPhotos||{};
+  const NW=112,NH=68,HG=14,VG=46,PAD=16;
+  const childOf={};nodes.forEach(n=>{const pid=n.parentId||"__root__";(childOf[pid]=childOf[pid]||[]).push(n.id);});
   const sw={};function calcSW(id){const ch=childOf[id]||[];if(!ch.length){sw[id]=NW;return NW;}const t=ch.reduce((s,c)=>s+calcSW(c),0)+HG*(ch.length-1);sw[id]=Math.max(NW,t);return sw[id];}
   const roots=childOf["__root__"]||[];roots.forEach(r=>calcSW(r));
   const pos={};function calcPos(id,cx,y){pos[id]={cx,y};const ch=childOf[id]||[];if(!ch.length)return;const tw=ch.reduce((s,c)=>s+sw[c],0)+HG*(ch.length-1);let x=cx-tw/2;ch.forEach(c=>{calcPos(c,x+sw[c]/2,y+NH+VG);x+=sw[c]+HG;});}
   const totalW=roots.reduce((s,r)=>s+sw[r],0)+HG*(roots.length-1);let rx=0;roots.forEach(r=>{calcPos(r,rx+sw[r]/2,0);rx+=sw[r]+HG;});
-  const maxY=Math.max(...Object.values(pos).map(p=>p.y));const svgW=Math.max(totalW,280)+PAD*2,svgH=maxY+NH+PAD;
+  const maxY=Object.values(pos).reduce((m,p)=>Math.max(m,p.y),0);
+  const svgW=Math.max(totalW,280)+PAD*2,svgH=maxY+NH+PAD;
   return(
     <div style={{overflowX:"auto",padding:"8px 0 16px"}}>
       <div style={{position:"relative",width:svgW,height:svgH,margin:"0 auto",minWidth:"100%"}}>
         <svg style={{position:"absolute",inset:0,width:"100%",height:"100%",overflow:"visible",pointerEvents:"none"}}>
-          {members.map(m=>{if(!m.parentMemberId||!pos[m.parentMemberId]||!pos[m.id])return null;const p1=pos[m.parentMemberId],p2=pos[m.id],x1=p1.cx+PAD,y1=p1.y+NH,x2=p2.cx+PAD,y2=p2.y,my=(y1+y2)/2;return <path key={m.id} d={`M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`} stroke="#CBD5E1" strokeWidth="1.5" fill="none"/>;})}
+          {nodes.map(n=>{if(!n.parentId||!pos[n.parentId]||!pos[n.id])return null;const p1=pos[n.parentId],p2=pos[n.id],x1=p1.cx+PAD,y1=p1.y+NH,x2=p2.cx+PAD,y2=p2.y,my=(y1+y2)/2;return <path key={n.id} d={`M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`} stroke="#CBD5E1" strokeWidth="1.5" fill="none"/>;})}
         </svg>
-        {members.map(m=>{if(!pos[m.id])return null;const p=pos[m.id],contact=contacts.find(c=>c.id===m.contactId),dn=contact?displayName(contact):"Unknown";
-          return(<div key={m.id} onClick={()=>contact&&onNodePress(contact)} style={{position:"absolute",left:p.cx-NW/2+PAD,top:p.y,width:NW,height:NH,background:C.white,borderRadius:12,boxShadow:"0 2px 8px rgba(0,0,0,0.08)",border:`1.5px solid ${C.border}`,cursor:contact?"pointer":"default",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"8px 6px",overflow:"hidden"}}>
-            {pp[m.contactId]?(<img src={pp[m.contactId]} alt="" style={{width:32,height:32,borderRadius:9,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:32,height:32,borderRadius:9,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:11,fontWeight:800,flexShrink:0}}>{initials(dn)}</div>)}
-            <div style={{width:"100%",textAlign:"center",lineHeight:1.25}}>
-              <div style={{fontSize:11,fontWeight:700,color:contact?C.text:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dn}</div>
-              {m.role&&<div style={{fontSize:9,color:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:1}}>{m.role}</div>}
+        {nodes.map(n=>{if(!pos[n.id])return null;const p=pos[n.id],photo=pp[n.id];
+          return(<div key={n.id} onClick={()=>onNodePress(n)} style={{position:"absolute",left:p.cx-NW/2+PAD,top:p.y,width:NW,height:NH,background:"#fff",borderRadius:12,boxShadow:"0 2px 8px rgba(0,0,0,0.09)",border:"1.5px solid #E5E7EB",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"8px 6px",overflow:"hidden",userSelect:"none"}}>
+            {photo?(<img src={photo} alt="" style={{width:30,height:30,borderRadius:15,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:30,height:30,borderRadius:15,background:gradient(n.name),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,fontWeight:800,flexShrink:0}}>{initials(n.name)}</div>)}
+            <div style={{width:"100%",textAlign:"center",lineHeight:1.2}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.name}</div>
+              {n.role&&<div style={{fontSize:9,color:"#6B7280",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:1}}>{n.role}</div>}
             </div>
           </div>);
         })}
@@ -203,8 +213,13 @@ export default function App(){
   const [tView,        setTView]        =useState("list");
   const [selTree,      setSelTree]      =useState(null);
   const [editTree,     setEditTree]     =useState(null);
-  const [tPickSearch,  setTPickSearch]  =useState("");
+
   const [treeDelCfm,   setTreeDelCfm]   =useState(false);
+  const [tnPhotos,     setTnPhotos]     =useState({});
+  const [showNodePopup,setShowNodePopup]=useState(false);
+  const [selNode,      setSelNode]      =useState(null);
+  const [editNode,     setEditNode]     =useState(null);
+  const [nodeDelCfm,   setNodeDelCfm]   =useState(false);
   /* Connect view */
   const [connView,     setConnView]     =useState("list");
   const [selConnect,   setSelConnect]   =useState(null);
@@ -237,6 +252,7 @@ export default function App(){
   const [qCtxVal,      setQCtxVal]      =useState("");
   const photoRef        =useRef(null);
   const profilePhotoRef =useRef(null);
+  const tnPhotoRef      =useRef(null);
   const othPhotoRef     =useRef(null);
   const importRef       =useRef(null);
   const alphaStripRef   =useRef(null);
@@ -265,7 +281,8 @@ export default function App(){
   }
   function loadPP(list){const m={};(list||[]).forEach(c=>{const p=localStorage.getItem(PROFILE_PREFIX+c.id);if(p)m[c.id]=p;});setProfilePhotos(m);}
   function loadOthPhotos(list){const m={};(list||[]).forEach(item=>{const p=localStorage.getItem(OTH_PHOTO_PFX+item.id);if(p)m[item.id]=p;});setOthPhotos(m);}
-  const handleUnlock=(ep,cd)=>{setPin(ep);if(cd){applyData(cd);loadPP(cd.contacts||[]);loadOthPhotos(cd.others||[]);}setNeedPin(false);};
+  function loadTnPhotos(treeList){const m={};(treeList||[]).flatMap(t=>t.nodes||[]).forEach(n=>{const p=localStorage.getItem(TN_PHOTO_PFX+n.id);if(p)m[n.id]=p;});setTnPhotos(m);}
+  const handleUnlock=(ep,cd)=>{setPin(ep);if(cd){applyData(cd);loadPP(cd.contacts||[]);loadOthPhotos(cd.others||[]);loadTnPhotos(cd.trees||[]);}setNeedPin(false);};
 
   /* ── 30-day reminder ── */
   useEffect(()=>{if(needPin)return;const l=localStorage.getItem(EXPORT_KEY);if(!l){localStorage.setItem(EXPORT_KEY,new Date().toISOString());return;}if((Date.now()-new Date(l).getTime())/(1000*60*60*24)>30)setShowExportReminder(true);},[needPin]);
@@ -307,6 +324,7 @@ export default function App(){
   const exportData=()=>{
     const photos={};
     contacts.forEach(c=>{const p=localStorage.getItem(PHOTO_PREFIX+c.id);if(p)photos[`card_${c.id}`]=p;const pp=localStorage.getItem(PROFILE_PREFIX+c.id);if(pp)photos[`pp_${c.id}`]=pp;});
+    trees.flatMap(t=>t.nodes||[]).forEach(n=>{const p=localStorage.getItem(TN_PHOTO_PFX+n.id);if(p)photos[`tn_${n.id}`]=p;});
     others.forEach(item=>{const p=localStorage.getItem(OTH_PHOTO_PFX+item.id);if(p)photos[`oth_${item.id}`]=p;});
     const payload={contacts,industries,contexts,trees,connects,others,photos,exportedAt:new Date().toISOString()};
     const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const a=document.createElement("a");a.href=url;a.download=`my-network-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();URL.revokeObjectURL(url);
@@ -322,7 +340,7 @@ export default function App(){
         setContacts(nc);setIndustries(ni);setContexts(nx);setTrees(nt);setConnects(ng);setOthers(no);
         const payload={contacts:nc,industries:ni,contexts:nx,trees:nt,connects:ng,others:no};
         localStorage.setItem(CACHE_KEY,JSON.stringify(payload));if(pin)saveCloud(pin,payload);
-        if(data.photos){const newPP={},newOth={};Object.entries(data.photos).forEach(([k,v])=>{try{if(k.startsWith("pp_")){const id=k.slice(3);localStorage.setItem(PROFILE_PREFIX+id,v);newPP[id]=v;}else if(k.startsWith("card_")){localStorage.setItem(PHOTO_PREFIX+k.slice(5),v);}else if(k.startsWith("oth_")){const id=k.slice(4);localStorage.setItem(OTH_PHOTO_PFX+id,v);newOth[id]=v;}else{localStorage.setItem(PHOTO_PREFIX+k,v);}}catch(_){}});setProfilePhotos(prev=>({...prev,...newPP}));setOthPhotos(prev=>({...prev,...newOth}));}
+        if(data.photos){const newPP={},newTN={},newOth={};Object.entries(data.photos).forEach(([k,v])=>{try{if(k.startsWith("pp_")){const id=k.slice(3);localStorage.setItem(PROFILE_PREFIX+id,v);newPP[id]=v;}else if(k.startsWith("card_")){localStorage.setItem(PHOTO_PREFIX+k.slice(5),v);}else if(k.startsWith("tn_")){const id=k.slice(3);localStorage.setItem(TN_PHOTO_PFX+id,v);newTN[id]=v;}else if(k.startsWith("oth_")){const id=k.slice(4);localStorage.setItem(OTH_PHOTO_PFX+id,v);newOth[id]=v;}else{localStorage.setItem(PHOTO_PREFIX+k,v);}}catch(_){}});setProfilePhotos(prev=>({...prev,...newPP}));setTnPhotos(prev=>({...prev,...newTN}));setOthPhotos(prev=>({...prev,...newOth}));}
         setImportStatus("✅ Imported!");setTimeout(()=>setImportStatus(""),3000);
       }catch(_){setImportStatus("❌ Invalid file.");setTimeout(()=>setImportStatus(""),3000);}
     };reader.readAsText(file);e.target.value="";
@@ -333,7 +351,8 @@ export default function App(){
   const toggleInd=ind=>setForm(p=>{const cur=p.industryTags||[];return{...p,industryTags:cur.includes(ind)?cur.filter(t=>t!==ind):[...cur,ind]};});
   const handlePhoto=useCallback(async e=>{const file=e.target.files?.[0];if(!file)return;try{const r=await resizeImg(file);setForm(p=>({...p,photo:r,photoCleared:false}));}catch(_){}e.target.value="";},[]);
   const handleProfilePhoto=useCallback(async e=>{const file=e.target.files?.[0];if(!file)return;try{const r=await resizePP(file);setForm(p=>({...p,profilePhoto:r,profilePhotoCleared:false}));}catch(_){}e.target.value="";},[]);
-  const handleOthPhoto=useCallback(async e=>{const file=e.target.files?.[0];if(!file)return;try{const r=await resizeImg(file,600);setEditOth(p=>({...p,photo:r,photoCleared:false}));}catch(_){}e.target.value="";},[]);
+  const handleTnPhoto=useCallback(async e=>{const file=e.target.files?.[0];if(!file)return;try{const r=await resizePP(file);setEditNode(p=>({...p,photo:r,photoCleared:false}));}catch(_){}e.target.value="";},[]);
+    const handleOthPhoto=useCallback(async e=>{const file=e.target.files?.[0];if(!file)return;try{const r=await resizeImg(file,600);setEditOth(p=>({...p,photo:r,photoCleared:false}));}catch(_){}e.target.value="";},[]);
 
   /* ── Contact CRUD ── */
   const openDetail=(c,origin="network")=>{setSelected(c);setDelConfirm(false);setDetailOrigin(origin);setView("detail");try{setSelPhoto(localStorage.getItem(PHOTO_PREFIX+c.id)||null);}catch(_){setSelPhoto(null);}};
@@ -344,17 +363,16 @@ export default function App(){
   const removeContact=()=>{const updated=contacts.filter(c=>c.id!==selected.id);persist(updated);try{localStorage.removeItem(PHOTO_PREFIX+selected.id);}catch(_){}try{localStorage.removeItem(PROFILE_PREFIX+selected.id);setProfilePhotos(p=>{const n={...p};delete n[selected.id];return n;});}catch(_){}setDelConfirm(false);setView("list");};
 
   /* ── Tree CRUD ── */
-  const startNewTree  =()=>{setEditTree({id:null,name:"",type:"company",members:[]});setTPickSearch("");setTreeDelCfm(false);setTView("editor");};
-  const openTreeDetail=(t)=>{setSelTree(t);setTreeDelCfm(false);setTView("detail");};
-  const openTreeEditor=()=>{setEditTree({...selTree,members:[...selTree.members]});setTPickSearch("");setTreeDelCfm(false);setTView("editor");};
-  const saveTree=()=>{if(!editTree?.name?.trim())return;const td={...editTree,id:editTree.id||tuid(),name:editTree.name.trim(),createdAt:editTree.createdAt||new Date().toISOString()};const updated=trees.find(t=>t.id===td.id)?trees.map(t=>t.id===td.id?td:t):[...trees,td];saveTrees(updated);setSelTree(td);setTView("detail");};
-  const deleteTree=()=>{saveTrees(trees.filter(t=>t.id!==selTree.id));setSelTree(null);setTreeDelCfm(false);setTView("list");};
-  const addTMember   =(cid)=>{if(!editTree||editTree.members.some(m=>m.contactId===cid))return;setEditTree(p=>({...p,members:[...p.members,{id:muid(),contactId:cid,parentMemberId:null,role:""}]}));};
-  const removeTMember=(mid)=>setEditTree(p=>({...p,members:p.members.filter(m=>m.id!==mid).map(m=>m.parentMemberId===mid?{...m,parentMemberId:null}:m)}));
-  const updateTMember=(mid,f,v)=>setEditTree(p=>({...p,members:p.members.map(m=>m.id===mid?{...m,[f]:v}:m)}));
-
-  /* ── Connect CRUD ── */
-  const startNewConnect  =()=>{setEditConnect({id:null,name:"",note:"",memberIds:[]});setConnPickSearch("");setConnDelCfm(false);setConnView("editor");};
+  const startNewTree  =()=>{setEditTree({id:null,name:"",type:"company"});setTreeDelCfm(false);setTView("editor");};
+  const openTreeDetail=(t)=>{setSelTree(t);setShowNodePopup(false);setSelNode(null);setTreeDelCfm(false);setTView("detail");};
+  const openTreeEditor=()=>{setEditTree({id:selTree.id,name:selTree.name,type:selTree.type});setTreeDelCfm(false);setTView("editor");};
+  const saveTree=()=>{if(!editTree?.name?.trim())return;const isNew=!editTree.id;const td={...editTree,id:editTree.id||tuid(),name:editTree.name.trim(),nodes:isNew?[]:(selTree?.nodes||[]),createdAt:editTree.createdAt||selTree?.createdAt||new Date().toISOString()};const updated=trees.find(t=>t.id===td.id)?trees.map(t=>t.id===td.id?td:t):[...trees,td];saveTrees(updated);setSelTree(td);setTView("detail");};
+  const deleteTree=()=>{(selTree?.nodes||[]).forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});setTnPhotos(p=>{const next={...p};(selTree?.nodes||[]).forEach(n=>delete next[n.id]);return next;});saveTrees(trees.filter(t=>t.id!==selTree.id));setSelTree(null);setTreeDelCfm(false);setTView("list");};
+  const openAddNode=(parentId)=>{setEditNode({id:null,name:"",role:"",details:"",facts:"",parentId:parentId??null,photo:null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
+  const openEditNode=(node)=>{setEditNode({...node,photo:tnPhotos[node.id]||null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
+  const saveNode=()=>{if(!editNode?.name?.trim())return;const isNew=!editNode.id;const nd={id:editNode.id||nid(),name:editNode.name.trim(),role:editNode.role||"",details:editNode.details||"",facts:editNode.facts||"",parentId:editNode.parentId??null,addedAt:editNode.addedAt||new Date().toISOString()};const newNodes=isNew?[...(selTree.nodes||[]),nd]:(selTree.nodes||[]).map(n=>n.id===nd.id?nd:n);const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);if(editNode.photo&&!editNode.photoCleared){try{localStorage.setItem(TN_PHOTO_PFX+nd.id,editNode.photo);setTnPhotos(p=>({...p,[nd.id]:editNode.photo}));}catch(_){}}else if(editNode.photoCleared){try{localStorage.removeItem(TN_PHOTO_PFX+nd.id);setTnPhotos(p=>{const n={...p};delete n[nd.id];return n;});}catch(_){}}setTView("detail");};
+  const deleteNode=(node)=>{const toDelete=[node,...getAllDesc(node.id,selTree.nodes||[])];toDelete.forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});const delIds=new Set(toDelete.map(n=>n.id));const newNodes=(selTree.nodes||[]).filter(n=>!delIds.has(n.id));const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);setTnPhotos(p=>{const next={...p};toDelete.forEach(n=>delete next[n.id]);return next;});setShowNodePopup(false);setSelNode(null);setNodeDelCfm(false);};
+    const startNewConnect  =()=>{setEditConnect({id:null,name:"",note:"",memberIds:[]});setConnPickSearch("");setConnDelCfm(false);setConnView("editor");};
   const openConnectDetail=(g)=>{setSelConnect(g);setConnDelCfm(false);setConnView("detail");};
   const openConnectEditor=()=>{setEditConnect({...selConnect,memberIds:[...selConnect.memberIds]});setConnPickSearch("");setConnDelCfm(false);setConnView("editor");};
   const saveConnect=()=>{if(!editConnect?.name?.trim())return;const gd={...editConnect,id:editConnect.id||gid(),name:editConnect.name.trim(),note:editConnect.note||"",createdAt:editConnect.createdAt||new Date().toISOString()};const updated=connects.find(g=>g.id===gd.id)?connects.map(g=>g.id===gd.id?gd:g):[...connects,gd];saveConnects(updated);setSelConnect(gd);setConnView("detail");};
@@ -378,7 +396,7 @@ export default function App(){
   const deleteOth=()=>{const updated=others.filter(o=>o.id!==selOth.id);saveOthers(updated);try{localStorage.removeItem(OTH_PHOTO_PFX+selOth.id);setOthPhotos(p=>{const n={...p};delete n[selOth.id];return n;});}catch(_){}setSelOth(null);setOthDelCfm(false);setOthView("list");};
 
   /* ── Filter/sort/group ── */
-  const sorted=contacts.filter(c=>{const q=search.toLowerCase();const matchQ=!q||[displayName(c),c.fullName,c.role,c.company,c.contextNote,c.funFact,...(c.industryTags||[]),c.socials?.fbig,c.socials?.line].some(v=>(v||"").toLowerCase().includes(q));return matchQ&&(filter==="all"||(c.industryTags||[]).includes(filter));}).sort((a,b)=>displayName(a).localeCompare(displayName(b)));
+  const sorted=contacts.filter(c=>{const q=search.toLowerCase();const matchQ=!q||[displayName(c),c.fullName,c.role,c.company,c.contextNote,c.funFact,...(c.industryTags||[]),c.socials?.fbig,c.socials?.line].some(v=>(v||"").toLowerCase().includes(q));const isFlagFilter=filter.startsWith("flag-");const matchFilter=filter==="all"||(isFlagFilter?c.flag===filter.slice(5):(c.industryTags||[]).includes(filter));return matchQ&&matchFilter;}).sort((a,b)=>displayName(a).localeCompare(displayName(b)));
   const grouped={};sorted.forEach(c=>{const l=(displayName(c)[0]||"#").toUpperCase();(grouped[l]=grouped[l]||[]).push(c);});
   const letters=Object.keys(grouped).sort();
 
@@ -414,6 +432,14 @@ export default function App(){
       <div style={{background:C.navy,padding:"14px 16px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}><NavBack onClick={()=>{setForm(blank(contexts[0]?.id));setShowQInd(false);setShowQCtx(false);setView(isEdit?"detail":"list");}}/><span style={{color:"#fff",fontSize:17,fontWeight:800}}>{isEdit?"Edit Contact":"Add to Network"}</span></div>
       <div style={{padding:"12px 13px 20px",display:"flex",flexDirection:"column",gap:9}}>
         <InfoCard><FL>Nickname *</FL><input value={fv("nickname")} onChange={sf("nickname")} placeholder="What do you call them?" style={{...INP,marginBottom:10}}/><Hr/><FL>Highlight</FL><input value={fv("fullName")} onChange={sf("fullName")} placeholder="One sentence that captures who they are…" style={INP}/></InfoCard>
+        <InfoCard>
+          <FL>Flag</FL>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            {FLAGS.map(f=>(<button key={f.id} onClick={()=>setForm(p=>({...p,flag:p.flag===f.id?null:f.id}))} style={{fontSize:26,padding:"6px 10px",borderRadius:10,border:`2px solid ${fv("flag")===f.id?C.navy:"transparent"}`,background:fv("flag")===f.id?"#F0F4FF":"transparent",cursor:"pointer",fontFamily:"inherit",lineHeight:1,transition:"border-color 0.15s"}}>{f.emoji}</button>))}
+            {fv("flag")&&<button onClick={()=>setForm(p=>({...p,flag:null}))} style={{marginLeft:4,fontSize:12,fontWeight:600,color:C.muted,background:"transparent",border:`1px solid ${C.border}`,borderRadius:8,padding:"4px 10px",cursor:"pointer",fontFamily:"inherit"}}>Clear</button>}
+            {!fv("flag")&&<span style={{fontSize:12,color:C.muted,marginLeft:4}}>No flag</span>}
+          </div>
+        </InfoCard>
         <InfoCard><FL>Role / Occupation</FL><input value={fv("role")} onChange={sf("role")} placeholder="e.g. Founder, Designer, Lawyer" style={{...INP,marginBottom:10}}/><Hr/><FL>Company / Org</FL><input value={fv("company")} onChange={sf("company")} placeholder="Where do they work?" style={INP}/></InfoCard>
         <InfoCard>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:7}}><div style={{fontSize:10,fontWeight:800,color:C.muted,letterSpacing:1,textTransform:"uppercase"}}>Where we met</div>{renderQA(showQCtx,setShowQCtx,qCtxVal,setQCtxVal,quickAddCtx,"New occasion…")}</div>
@@ -470,7 +496,7 @@ export default function App(){
         <div style={{color:"#fff",fontSize:22,fontWeight:800,marginTop:10,letterSpacing:-0.5}}>{dn}</div>
         {(selected.role||selected.company)&&<div style={{color:"#90A4C8",fontSize:13,marginTop:4}}>{[selected.role,selected.company].filter(Boolean).join(" · ")}</div>}
         {selected.fullName&&<div style={{color:"rgba(255,255,255,0.8)",fontSize:13,marginTop:6,lineHeight:1.55,fontStyle:"italic"}}>"{selected.fullName}"</div>}
-        <div style={{marginTop:10,display:"flex",gap:6,flexWrap:"wrap"}}><MiniChip bg="rgba(255,255,255,0.15)" fg="#fff">{ctx.icon} {ctx.label}</MiniChip>{selected.contextNote&&<MiniChip bg="rgba(255,255,255,0.1)" fg="rgba(255,255,255,0.75)">{selected.contextNote}</MiniChip>}</div>
+        <div style={{marginTop:10,display:"flex",gap:6,flexWrap:"wrap"}}><MiniChip bg="rgba(255,255,255,0.15)" fg="#fff">{ctx.icon} {ctx.label}</MiniChip>{selected.contextNote&&<MiniChip bg="rgba(255,255,255,0.1)" fg="rgba(255,255,255,0.75)">{selected.contextNote}</MiniChip>}{selected.flag&&<span style={{fontSize:18,lineHeight:1}}>{FLAG_EMOJI[selected.flag]}</span>}</div>
       </div>
       <div style={{padding:"12px 13px",display:"flex",flexDirection:"column",gap:9}}>
         {((selected.industryTags||[]).length>0||selected.industryNote)&&(<InfoCard><FL>Industry</FL><div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:selected.industryNote?8:0}}>{(selected.industryTags||[]).map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})}</div>{selected.industryNote&&<div style={{fontSize:13,color:C.muted,lineHeight:1.55}}>{selected.industryNote}</div>}</InfoCard>)}
@@ -491,31 +517,99 @@ export default function App(){
 
   /* ════ TREE EDITOR ════ */
   if(tView==="editor"&&editTree!==null){
-    const et=editTree;const okT=et.name?.trim().length>0;
-    const available=contacts.filter(c=>!tPickSearch||(displayName(c).toLowerCase().includes(tPickSearch.toLowerCase())||(c.role||"").toLowerCase().includes(tPickSearch.toLowerCase()))).sort((a,b)=>displayName(a).localeCompare(displayName(b)));
-    const added=new Set(et.members.map(m=>m.contactId));
+    const et=editTree;const okT=et.name?.trim().length>0;const isNew=!et.id;
     return(<div style={{...WRAP,paddingBottom:30}}>
-      <div style={{background:C.navy,padding:"14px 16px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}><NavBack onClick={()=>{setTreeDelCfm(false);setTView(selTree?"detail":"list");}}/><span style={{color:"#fff",fontSize:17,fontWeight:800}}>{et.id?"Edit Tree":"New Tree"}</span></div>
+      <div style={{background:C.navy,padding:"14px 16px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}><NavBack onClick={()=>{setTreeDelCfm(false);setTView(selTree&&!isNew?"detail":"list");}}/><span style={{color:"#fff",fontSize:17,fontWeight:800}}>{isNew?"New Tree":"Rename Tree"}</span></div>
       <div style={{padding:"12px 13px 20px",display:"flex",flexDirection:"column",gap:9}}>
         <InfoCard><FL>Tree Name *</FL><input value={et.name} onChange={e=>setEditTree(p=>({...p,name:e.target.value}))} placeholder="e.g. Acme Corp, Smith Family…" style={INP}/></InfoCard>
         <InfoCard><FL>Type</FL><div style={{display:"flex",gap:7,flexWrap:"wrap"}}>{TREE_TYPES.map(t=>(<button key={t.id} onClick={()=>setEditTree(p=>({...p,type:t.id}))} style={{padding:"8px 13px",borderRadius:9,border:`2px solid ${et.type===t.id?C.navy:C.border}`,background:et.type===t.id?C.navy:"transparent",color:et.type===t.id?"#fff":C.muted,fontSize:12,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>{t.icon} {t.label}</button>))}</div></InfoCard>
-        {et.members.length>0&&(<div><div style={{fontSize:10,fontWeight:800,color:C.muted,letterSpacing:1,textTransform:"uppercase",padding:"4px 2px 8px"}}>Members ({et.members.length})</div>{et.members.map(m=>{const contact=contacts.find(c=>c.id===m.contactId);const dn=contact?displayName(contact):"Unknown";const pp=profilePhotos[m.contactId];return(<InfoCard key={m.id} style={{marginBottom:8}}><div style={{display:"flex",alignItems:"center",gap:10,marginBottom:10}}>{pp?(<img src={pp} alt="" style={{width:38,height:38,borderRadius:11,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:38,height:38,borderRadius:11,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:13,fontWeight:800,flexShrink:0}}>{initials(dn)}</div>)}<div style={{flex:1}}><div style={{fontSize:14,fontWeight:700,color:C.text}}>{dn}</div>{contact?.role&&<div style={{fontSize:11,color:C.muted}}>{contact.role}</div>}</div><button onClick={()=>removeTMember(m.id)} style={{background:C.redBg,border:"none",color:C.red,borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>✕</button></div><div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}><span style={{fontSize:10,fontWeight:800,color:C.muted,letterSpacing:0.8,textTransform:"uppercase",width:46,flexShrink:0}}>Role</span><input value={m.role} onChange={e=>updateTMember(m.id,"role",e.target.value)} placeholder="e.g. CEO, Father…" style={{flex:1,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 10px",fontSize:13,outline:"none",color:C.text,fontFamily:"inherit",background:"transparent"}}/></div><div style={{display:"flex",alignItems:"center",gap:8}}><span style={{fontSize:10,fontWeight:800,color:C.muted,letterSpacing:0.8,textTransform:"uppercase",width:46,flexShrink:0}}>Under</span><select value={m.parentMemberId||""} onChange={e=>updateTMember(m.id,"parentMemberId",e.target.value||null)} style={{flex:1,border:`1px solid ${C.border}`,borderRadius:8,padding:"6px 10px",fontSize:13,color:C.text,background:C.white,fontFamily:"inherit",outline:"none"}}><option value="">— Root (no parent) —</option>{et.members.filter(x=>x.id!==m.id).map(x=>{const xc=contacts.find(c=>c.id===x.contactId);return <option key={x.id} value={x.id}>{xc?displayName(xc):"?"}{x.role?` (${x.role})`:""}</option>;})}</select></div></InfoCard>);})}</div>)}
-        <InfoCard><FL>Add from My Network</FL><input value={tPickSearch} onChange={e=>setTPickSearch(e.target.value)} placeholder="Search contacts…" style={{...INP,border:`1px solid ${C.border}`,borderRadius:9,padding:"8px 10px",fontSize:13,marginBottom:8}}/><div style={{maxHeight:220,overflowY:"auto",display:"flex",flexDirection:"column",gap:6}}>{contacts.length===0?<div style={{fontSize:13,color:C.muted,textAlign:"center",padding:"12px 0"}}>No contacts yet.</div>:available.map(c=>{const a=added.has(c.id);const pp=profilePhotos[c.id];return(<div key={c.id} onClick={()=>!a&&addTMember(c.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 10px",borderRadius:10,background:a?"#F9FAFB":C.white,cursor:a?"default":"pointer",border:`1px solid ${C.border}`,opacity:a?0.5:1}}>{pp?(<img src={pp} alt="" style={{width:34,height:34,borderRadius:10,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:34,height:34,borderRadius:10,background:gradient(displayName(c)),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:12,fontWeight:800,flexShrink:0}}>{initials(displayName(c))}</div>)}<div style={{flex:1,minWidth:0}}><div style={{fontSize:13,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{displayName(c)}</div>{(c.role||c.company)&&<div style={{fontSize:11,color:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.role,c.company].filter(Boolean).join(" · ")}</div>}</div><span style={{fontSize:16,color:a?C.muted:C.amber,fontWeight:700,flexShrink:0}}>{a?"✓":"+"}</span></div>);})}</div></InfoCard>
-        <button onClick={saveTree} disabled={!okT} style={{background:okT?C.amber:C.border,border:"none",borderRadius:14,padding:15,color:okT?"#fff":C.muted,fontSize:15,fontWeight:800,cursor:okT?"pointer":"not-allowed",boxShadow:okT?"0 4px 14px rgba(245,158,11,0.4)":"none",fontFamily:"inherit"}}>Save Tree</button>
-        {et.id&&(!treeDelCfm?<button onClick={()=>setTreeDelCfm(true)} style={{background:"transparent",border:`1.5px solid ${C.red}`,borderRadius:14,padding:13,color:C.red,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Delete This Tree</button>:(<InfoCard style={{border:`1px solid ${C.redBg}`}}><div style={{fontSize:14,fontWeight:600,color:C.text,marginBottom:12,textAlign:"center"}}>Delete "{et.name}"?</div><div style={{display:"flex",gap:9}}><button onClick={()=>setTreeDelCfm(false)} style={{flex:1,padding:11,border:`1px solid ${C.border}`,background:"transparent",borderRadius:11,fontSize:14,fontWeight:600,color:C.muted,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button><button onClick={deleteTree} style={{flex:1,padding:11,border:"none",background:C.red,borderRadius:11,fontSize:14,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"inherit"}}>Yes, Delete</button></div></InfoCard>))}
+        <button onClick={saveTree} disabled={!okT} style={{background:okT?C.amber:C.border,border:"none",borderRadius:14,padding:15,color:okT?"#fff":C.muted,fontSize:15,fontWeight:800,cursor:okT?"pointer":"not-allowed",boxShadow:okT?"0 4px 14px rgba(245,158,11,0.4)":"none",fontFamily:"inherit"}}>{isNew?"Create Tree":"Save Name"}</button>
+        {!isNew&&(!treeDelCfm?<button onClick={()=>setTreeDelCfm(true)} style={{background:"transparent",border:`1.5px solid ${C.red}`,borderRadius:14,padding:13,color:C.red,fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Delete This Tree</button>:(<InfoCard style={{border:`1px solid ${C.redBg}`}}><div style={{fontSize:14,fontWeight:600,color:C.text,marginBottom:12,textAlign:"center"}}>Delete "{et.name}" and all {(selTree?.nodes||[]).length} {(selTree?.nodes||[]).length===1?"person":"people"} in it?</div><div style={{display:"flex",gap:9}}><button onClick={()=>setTreeDelCfm(false)} style={{flex:1,padding:11,border:`1px solid ${C.border}`,background:"transparent",borderRadius:11,fontSize:14,fontWeight:600,color:C.muted,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button><button onClick={deleteTree} style={{flex:1,padding:11,border:"none",background:C.red,borderRadius:11,fontSize:14,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"inherit"}}>Yes, Delete</button></div></InfoCard>))}
+      </div>
+    </div>);
+  }
+
+  /* ════ NODE FORM ════ */
+  if(tView==="nodeForm"&&editNode!==null){
+    const ok=editNode.name?.trim().length>0;const isNew=!editNode.id;
+    const otherNodes=(selTree?.nodes||[]).filter(n=>n.id!==editNode.id);
+    const availParents=otherNodes.filter(n=>!isDescOf(n.id,editNode.id,selTree?.nodes||[]));
+    return(<div style={{...WRAP,paddingBottom:30}}>
+      <div style={{background:C.navy,padding:"14px 16px",display:"flex",alignItems:"center",gap:10,position:"sticky",top:0,zIndex:10}}><NavBack onClick={()=>setTView("detail")}/><span style={{color:"#fff",fontSize:17,fontWeight:800}}>{isNew?"Add Person":"Edit Person"}</span></div>
+      <div style={{padding:"12px 13px 20px",display:"flex",flexDirection:"column",gap:9}}>
+        <InfoCard>
+          <FL>Photo</FL><input ref={tnPhotoRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleTnPhoto}/>
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:10}}>
+            <div style={{position:"relative",width:90,height:90}}>
+              {editNode.photo?(<img src={editNode.photo} alt="" style={{width:90,height:90,borderRadius:45,objectFit:"cover",border:`2px solid ${C.border}`}}/>):(<div style={{width:90,height:90,borderRadius:45,background:gradient(editNode.name||"?"),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:28,fontWeight:800}}>{initials(editNode.name||"?")}</div>)}
+              {editNode.photo&&<button onClick={()=>setEditNode(p=>({...p,photo:null,photoCleared:true}))} style={{position:"absolute",top:0,right:0,width:24,height:24,borderRadius:12,background:C.red,border:"2px solid #fff",color:"#fff",fontSize:12,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit"}}>×</button>}
+            </div>
+            <button onClick={()=>tnPhotoRef.current?.click()} style={{padding:"7px 18px",background:"#F3F4F6",border:`1px solid ${C.border}`,borderRadius:9,fontSize:13,fontWeight:600,color:C.text,cursor:"pointer",fontFamily:"inherit"}}>{editNode.photo?"Change Photo":"Add Photo"}</button>
+          </div>
+        </InfoCard>
+        <InfoCard><FL>Name *</FL><input value={editNode.name||""} onChange={e=>setEditNode(p=>({...p,name:e.target.value}))} placeholder="Person's name…" style={INP}/></InfoCard>
+        <InfoCard><FL>Role</FL><input value={editNode.role||""} onChange={e=>setEditNode(p=>({...p,role:e.target.value}))} placeholder="e.g. CEO, Father, Team Lead…" style={INP}/></InfoCard>
+        <InfoCard><FL>Details</FL><textarea value={editNode.details||""} onChange={e=>setEditNode(p=>({...p,details:e.target.value}))} rows={3} placeholder="Background, experience, context…" style={{...INP,resize:"none",lineHeight:1.55}}/></InfoCard>
+        <InfoCard><FL>Personal Facts</FL><textarea value={editNode.facts||""} onChange={e=>setEditNode(p=>({...p,facts:e.target.value}))} rows={3} placeholder="Interesting things to know…" style={{...INP,resize:"none",lineHeight:1.55}}/></InfoCard>
+        {availParents.length>0&&(<InfoCard><FL>Reports To</FL><select value={editNode.parentId||""} onChange={e=>setEditNode(p=>({...p,parentId:e.target.value||null}))} style={{width:"100%",border:`1px solid ${C.border}`,borderRadius:9,padding:"9px 10px",fontSize:14,color:C.text,background:C.white,fontFamily:"inherit",outline:"none"}}><option value="">— None (root level) —</option>{availParents.map(n=>(<option key={n.id} value={n.id}>{n.name}{n.role?` (${n.role})`:""}</option>))}</select></InfoCard>)}
+        <button onClick={saveNode} disabled={!ok} style={{background:ok?C.amber:C.border,border:"none",borderRadius:14,padding:15,color:ok?"#fff":C.muted,fontSize:15,fontWeight:800,cursor:ok?"pointer":"not-allowed",boxShadow:ok?"0 4px 14px rgba(245,158,11,0.4)":"none",fontFamily:"inherit"}}>{isNew?"Add to Tree":"Save Changes"}</button>
       </div>
     </div>);
   }
 
   /* ════ TREE DETAIL ════ */
   if(tView==="detail"&&selTree){
-    const typeInfo=treeTypeFor(selTree.type);
+    const typeInfo=treeTypeFor(selTree.type);const nodes=selTree.nodes||[];
+    const dc=selNode?countDesc(selNode.id,nodes):0;
     return(<div style={{...WRAP,paddingBottom:30}}>
       <div style={{background:C.navy,padding:"14px 16px 18px",position:"sticky",top:0,zIndex:10}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><NavBack onClick={()=>setTView("list")}/><button onClick={openTreeEditor} style={{background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",borderRadius:9,padding:"7px 14px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>✏️ Edit</button></div>
-        <div style={{marginTop:12}}><div style={{color:"#fff",fontSize:22,fontWeight:800,letterSpacing:-0.5}}>{selTree.name}</div><div style={{marginTop:7,display:"flex",gap:6,flexWrap:"wrap"}}><MiniChip bg="rgba(255,255,255,0.15)" fg="#fff">{typeInfo.icon} {typeInfo.label}</MiniChip><MiniChip bg="rgba(255,255,255,0.1)" fg="rgba(255,255,255,0.75)">{selTree.members.length} {selTree.members.length===1?"person":"people"}</MiniChip></div></div>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><NavBack onClick={()=>{setShowNodePopup(false);setSelNode(null);setTView("list");}}/><button onClick={openTreeEditor} style={{background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",borderRadius:9,padding:"7px 14px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>✏️ Rename</button></div>
+        <div style={{marginTop:12}}><div style={{color:"#fff",fontSize:22,fontWeight:800,letterSpacing:-0.5}}>{selTree.name}</div><div style={{marginTop:7,display:"flex",gap:6,flexWrap:"wrap"}}><MiniChip bg="rgba(255,255,255,0.15)" fg="#fff">{typeInfo.icon} {typeInfo.label}</MiniChip><MiniChip bg="rgba(255,255,255,0.1)" fg="rgba(255,255,255,0.75)">{nodes.length} {nodes.length===1?"person":"people"}</MiniChip></div></div>
       </div>
-      <div style={{padding:"12px 13px 80px"}}>{selTree.members.length===0?(<div style={{textAlign:"center",padding:"52px 24px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>🌱</div><div style={{fontSize:16,fontWeight:700,color:"#374151",marginBottom:6}}>This tree is empty</div><div style={{fontSize:13,lineHeight:1.6}}>Tap Edit to add people.</div></div>):<OrgChart members={selTree.members} contacts={contacts} profilePhotos={profilePhotos} onNodePress={c=>openDetail(c,"tree")}/>}</div>
+      <div style={{padding:"12px 13px 80px"}}>
+        {nodes.length===0?(
+          <div style={{textAlign:"center",padding:"52px 24px"}}>
+            <div style={{fontSize:48,marginBottom:12}}>🌱</div>
+            <div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:8}}>This tree is empty</div>
+            <div style={{fontSize:13,color:C.muted,marginBottom:24,lineHeight:1.6}}>Tap the button below to add the first person.</div>
+            <button onClick={()=>openAddNode(null)} style={{padding:"13px 28px",background:C.amber,border:"none",borderRadius:13,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(245,158,11,0.4)"}}>+ Add First Person</button>
+          </div>
+        ):(
+          <OrgChart nodes={nodes} tnPhotos={tnPhotos} onNodePress={node=>{setSelNode(node);setShowNodePopup(true);setNodeDelCfm(false);}}/>
+        )}
+      </div>
+
+      {/* Node popup */}
+      {showNodePopup&&selNode&&(
+        <div onClick={()=>{setShowNodePopup(false);setSelNode(null);setNodeDelCfm(false);}} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.52)",zIndex:100,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div onClick={e=>e.stopPropagation()} style={{background:C.white,borderRadius:20,padding:"18px 18px 20px",maxWidth:360,width:"100%",maxHeight:"84vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.35)"}}>
+            <div style={{display:"flex",justifyContent:"flex-end",marginBottom:6}}>
+              <button onClick={()=>{setShowNodePopup(false);setSelNode(null);setNodeDelCfm(false);}} style={{background:"#F3F4F6",border:"none",borderRadius:8,width:28,height:28,cursor:"pointer",fontSize:16,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"inherit",color:C.muted}}>×</button>
+            </div>
+            <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:14}}>
+              {tnPhotos[selNode.id]?(<img src={tnPhotos[selNode.id]} alt="" style={{width:58,height:58,borderRadius:29,objectFit:"cover",flexShrink:0,border:`2px solid ${C.border}`}}/>):(<div style={{width:58,height:58,borderRadius:29,background:gradient(selNode.name),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:20,fontWeight:800,flexShrink:0}}>{initials(selNode.name)}</div>)}
+              <div><div style={{fontSize:18,fontWeight:800,color:C.text}}>{selNode.name}</div>{selNode.role&&<div style={{fontSize:13,color:C.muted,marginTop:2}}>{selNode.role}</div>}</div>
+            </div>
+            {selNode.details&&(<div style={{marginBottom:10,padding:"10px 12px",background:"#F9FAFB",borderRadius:10}}><div style={{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Details</div><div style={{fontSize:13,color:C.text,lineHeight:1.55,whiteSpace:"pre-wrap"}}>{selNode.details}</div></div>)}
+            {selNode.facts&&(<div style={{marginBottom:14,padding:"10px 12px",background:"#F9FAFB",borderRadius:10}}><div style={{fontSize:9,fontWeight:800,color:C.muted,letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Personal Facts</div><div style={{fontSize:13,color:C.text,lineHeight:1.55,whiteSpace:"pre-wrap"}}>{selNode.facts}</div></div>)}
+            {!nodeDelCfm?(
+              <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                <button onClick={()=>openEditNode(selNode)} style={{padding:"11px",background:C.navy,border:"none",borderRadius:11,color:"#fff",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>✏️ Edit Person</button>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>openAddNode(selNode.id)} style={{flex:1,padding:"10px",background:"#F0FDF4",border:"1.5px solid #166534",borderRadius:11,color:"#166534",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Sub-level</button>
+                  <button onClick={()=>openAddNode(selNode.parentId)} style={{flex:1,padding:"10px",background:"#EFF6FF",border:"1.5px solid #1D4ED8",borderRadius:11,color:"#1D4ED8",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Sibling</button>
+                </div>
+                <button onClick={()=>setNodeDelCfm(true)} style={{padding:"10px",background:C.redBg,border:"none",borderRadius:11,color:C.red,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
+              </div>
+            ):(
+              <div>
+                <div style={{fontSize:13,color:C.text,marginBottom:12,textAlign:"center",fontWeight:600,lineHeight:1.55}}>Remove {selNode.name}?{dc>0?` This will also remove ${dc} sub-level${dc>1?"s":""}.`:""}</div>
+                <div style={{display:"flex",gap:8}}><button onClick={()=>setNodeDelCfm(false)} style={{flex:1,padding:11,border:`1px solid ${C.border}`,background:"transparent",borderRadius:11,fontSize:14,fontWeight:600,color:C.muted,cursor:"pointer",fontFamily:"inherit"}}>Cancel</button><button onClick={()=>deleteNode(selNode)} style={{flex:1,padding:11,border:"none",background:C.red,borderRadius:11,fontSize:14,fontWeight:700,color:"#fff",cursor:"pointer",fontFamily:"inherit"}}>Yes, Remove</button></div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>);
   }
 
@@ -637,8 +731,10 @@ export default function App(){
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:11}}><div><div style={{color:"#fff",fontSize:21,fontWeight:800,letterSpacing:-0.5}}>My Network</div><div style={{color:"#8A9BC8",fontSize:11,marginTop:1}}>{contacts.length} {contacts.length===1?"person":"people"}</div></div><button onClick={()=>setSidebarOpen(true)} style={{background:"rgba(255,255,255,0.12)",border:"none",color:"#fff",borderRadius:9,padding:"8px 11px",cursor:"pointer",fontSize:18,lineHeight:1,fontFamily:"inherit"}}>☰</button></div>
         <div style={{background:"rgba(255,255,255,0.1)",borderRadius:10,display:"flex",alignItems:"center",padding:"0 11px",gap:7}}><span style={{fontSize:13,color:"rgba(255,255,255,0.4)"}}>🔍</span><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, industry, fun fact…" style={{flex:1,background:"transparent",border:"none",outline:"none",color:"#fff",fontSize:14,padding:"10px 0",fontFamily:"inherit"}}/>{search&&<span onClick={()=>setSearch("")} style={{color:"rgba(255,255,255,0.4)",cursor:"pointer",fontSize:18,lineHeight:1}}>×</span>}</div>
       </div>
-      <div style={{display:"flex",gap:7,padding:"11px 13px 0",overflowX:"auto",scrollbarWidth:"none"}}>{["all",...industries].map(ind=>(<button key={ind} onClick={()=>setFilter(ind)} style={{flexShrink:0,padding:"6px 13px",borderRadius:999,fontSize:12,fontWeight:700,cursor:"pointer",border:"none",outline:"none",fontFamily:"inherit",background:filter===ind?C.navy:C.white,color:filter===ind?"#fff":C.muted,boxShadow:filter===ind?"0 2px 8px rgba(27,42,92,0.18)":"0 1px 2px rgba(0,0,0,0.07)"}}>{ind==="all"?"All":ind}</button>))}</div>
-      <div style={{padding:"8px 11px 0"}}>{sorted.length===0?(<div style={{textAlign:"center",padding:"56px 22px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>{contacts.length===0?"👋":"🔍"}</div><div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:7}}>{contacts.length===0?"Start building your network":"No one found"}</div><div style={{fontSize:13,lineHeight:1.6}}>{contacts.length===0?"Tap + to add your first contact.":"Try a different search or filter."}</div></div>):letters.map(letter=>(<div key={letter}><div id={`alpha-${letter}`} style={{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1.2,padding:"10px 4px 5px",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,marginBottom:4}}>{letter}</div>{grouped[letter].map(c=>{const ctx=ctxFor(c.context,contexts);const dn=displayName(c);const pp=profilePhotos[c.id];return(<div key={c.id} onClick={()=>openDetail(c)} style={{background:C.white,borderRadius:13,marginBottom:6,padding:"13px",display:"flex",alignItems:"center",gap:11,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",cursor:"pointer"}}>{pp?(<img src={pp} alt="" style={{width:48,height:48,borderRadius:13,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:48,height:48,borderRadius:13,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:16,fontWeight:800,flexShrink:0,letterSpacing:-0.5}}>{initials(dn)}</div>)}<div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dn}</div>{(c.role||c.company)&&<div style={{fontSize:11,color:C.muted,marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.role,c.company].filter(Boolean).join(" · ")}</div>}<div style={{display:"flex",gap:5,flexWrap:"wrap"}}><MiniChip bg={ctx.bg} fg={ctx.fg}>{ctx.icon} {ctx.label}</MiniChip>{(c.industryTags||[]).slice(0,1).map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})} {(c.industryTags||[]).length>1&&<MiniChip bg="#F3F4F6" fg={C.muted}>+{c.industryTags.length-1}</MiniChip>}</div></div><span style={{color:"#D1D5DB",fontSize:18,flexShrink:0}}>›</span></div>);})}</div>))}</div>
+      <div style={{display:"flex",gap:7,padding:"11px 13px 0",overflowX:"auto",scrollbarWidth:"none"}}>
+        {["all",...FLAGS.map(f=>"flag-"+f.id),...industries].map(ind=>{const isFlag=ind.startsWith("flag-");const flagId=isFlag?ind.slice(5):null;const active=filter===ind;return(<button key={ind} onClick={()=>setFilter(ind)} style={{flexShrink:0,padding:isFlag?"6px 10px":"6px 13px",borderRadius:999,fontSize:isFlag?18:12,fontWeight:700,cursor:"pointer",border:"none",outline:"none",fontFamily:"inherit",background:active?C.navy:C.white,color:active?"#fff":C.muted,boxShadow:active?"0 2px 8px rgba(27,42,92,0.18)":"0 1px 2px rgba(0,0,0,0.07)",lineHeight:1}}>{ind==="all"?"All":isFlag?FLAG_EMOJI[flagId]:ind}</button>);})}
+      </div>
+      <div style={{padding:"8px 11px 0"}}>{sorted.length===0?(<div style={{textAlign:"center",padding:"56px 22px",color:C.muted}}><div style={{fontSize:44,marginBottom:10}}>{contacts.length===0?"👋":"🔍"}</div><div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:7}}>{contacts.length===0?"Start building your network":"No one found"}</div><div style={{fontSize:13,lineHeight:1.6}}>{contacts.length===0?"Tap + to add your first contact.":"Try a different search or filter."}</div></div>):letters.map(letter=>(<div key={letter}><div id={`alpha-${letter}`} style={{fontSize:11,fontWeight:800,color:C.muted,letterSpacing:1.2,padding:"10px 4px 5px",textTransform:"uppercase",borderBottom:`1px solid ${C.border}`,marginBottom:4}}>{letter}</div>{grouped[letter].map(c=>{const ctx=ctxFor(c.context,contexts);const dn=displayName(c);const pp=profilePhotos[c.id];return(<div key={c.id} onClick={()=>openDetail(c)} style={{background:C.white,borderRadius:13,marginBottom:6,padding:"13px",display:"flex",alignItems:"center",gap:11,boxShadow:"0 1px 3px rgba(0,0,0,0.06)",cursor:"pointer"}}>{pp?(<img src={pp} alt="" style={{width:48,height:48,borderRadius:13,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:48,height:48,borderRadius:13,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:16,fontWeight:800,flexShrink:0,letterSpacing:-0.5}}>{initials(dn)}</div>)}<div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:700,color:C.text,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{dn}</span>{c.flag&&<span style={{fontSize:14,flexShrink:0}}>{FLAG_EMOJI[c.flag]}</span>}</div>{(c.role||c.company)&&<div style={{fontSize:11,color:C.muted,marginBottom:5,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{[c.role,c.company].filter(Boolean).join(" · ")}</div>}<div style={{display:"flex",gap:5,flexWrap:"wrap"}}><MiniChip bg={ctx.bg} fg={ctx.fg}>{ctx.icon} {ctx.label}</MiniChip>{(c.industryTags||[]).slice(0,1).map((ind,i)=>{const idx=industries.indexOf(ind);const col=indColor(idx>=0?idx:i);return <MiniChip key={i} bg={col.bg} fg={col.fg}>{ind}</MiniChip>;})} {(c.industryTags||[]).length>1&&<MiniChip bg="#F3F4F6" fg={C.muted}>+{c.industryTags.length-1}</MiniChip>}</div></div><span style={{color:"#D1D5DB",fontSize:18,flexShrink:0}}>›</span></div>);})}</div>))}</div>
       {letters.length>1&&(
         <div ref={alphaStripRef}
           style={{position:"fixed",right:6,top:"50%",transform:"translateY(-50%)",display:"flex",flexDirection:"column",alignItems:"center",zIndex:30,background:"rgba(255,255,255,0.92)",borderRadius:12,padding:"5px 3px",boxShadow:"0 2px 10px rgba(0,0,0,0.13)",userSelect:"none",WebkitUserSelect:"none",touchAction:"none",maxHeight:`calc(100vh - ${TAB_H+100}px)`,overflowY:"auto"}}
@@ -658,7 +754,7 @@ export default function App(){
     {/* ── TREES ── */}
     {activeTab==="trees"&&(<div>
       <div style={{background:C.navy,padding:"14px 16px 16px",position:"sticky",top:0,zIndex:10}}><div style={{color:"#fff",fontSize:21,fontWeight:800,letterSpacing:-0.5}}>Trees</div><div style={{color:"#8A9BC8",fontSize:11,marginTop:1}}>{trees.length} {trees.length===1?"tree":"trees"}</div></div>
-      <div style={{padding:"12px 11px 0"}}>{trees.length===0?(<div style={{textAlign:"center",padding:"60px 24px",color:C.muted}}><div style={{fontSize:52,marginBottom:14}}>🌳</div><div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:8}}>No trees yet</div><div style={{fontSize:13,lineHeight:1.7}}>Tap + to map out an organization or family.</div></div>):trees.map(tree=>{const typeInfo=treeTypeFor(tree.type);return(<div key={tree.id} onClick={()=>openTreeDetail(tree)} style={{background:C.white,borderRadius:14,marginBottom:10,padding:"14px 16px",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}><div style={{fontSize:16,fontWeight:800,color:C.text}}>{tree.name}</div><MiniChip bg={typeInfo.bg} fg={typeInfo.fg}>{typeInfo.icon} {typeInfo.label}</MiniChip></div><div style={{fontSize:12,color:C.muted,marginBottom:10}}>{tree.members.length} {tree.members.length===1?"person":"people"}</div><div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex"}}>{tree.members.slice(0,6).map((m,i)=>{const contact=contacts.find(c=>c.id===m.contactId);const dn=contact?displayName(contact):"?";const pp=profilePhotos[m.contactId];return pp?(<img key={m.id} src={pp} alt="" style={{width:30,height:30,borderRadius:9,objectFit:"cover",border:"2px solid #fff",marginLeft:i>0?-8:0,zIndex:tree.members.length-i}}/>):(<div key={m.id} style={{width:30,height:30,borderRadius:9,background:gradient(dn),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,fontWeight:800,border:"2px solid #fff",marginLeft:i>0?-8:0,zIndex:tree.members.length-i}}>{initials(dn)}</div>);})} {tree.members.length>6&&<div style={{width:30,height:30,borderRadius:9,background:C.muted,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,fontWeight:800,border:"2px solid #fff",marginLeft:-8}}>+{tree.members.length-6}</div>}</div><span style={{color:"#D1D5DB",fontSize:18}}>›</span></div></div>);})}</div>
+      <div style={{padding:"12px 11px 0"}}>{trees.length===0?(<div style={{textAlign:"center",padding:"60px 24px",color:C.muted}}><div style={{fontSize:52,marginBottom:14}}>🌳</div><div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:8}}>No trees yet</div><div style={{fontSize:13,lineHeight:1.7}}>Tap + to create a standalone org chart or hierarchy.</div></div>):trees.map(tree=>{const typeInfo=treeTypeFor(tree.type);const treeNodes=tree.nodes||[];return(<div key={tree.id} onClick={()=>openTreeDetail(tree)} style={{background:C.white,borderRadius:14,marginBottom:10,padding:"14px 16px",cursor:"pointer",boxShadow:"0 1px 4px rgba(0,0,0,0.06)"}}><div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:5}}><div style={{fontSize:16,fontWeight:800,color:C.text}}>{tree.name}</div><MiniChip bg={typeInfo.bg} fg={typeInfo.fg}>{typeInfo.icon} {typeInfo.label}</MiniChip></div><div style={{fontSize:12,color:C.muted,marginBottom:10}}>{treeNodes.length} {treeNodes.length===1?"person":"people"}</div><div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><div style={{display:"flex"}}>{treeNodes.slice(0,6).map((n,i)=>{const photo=tnPhotos[n.id];return photo?(<img key={n.id} src={photo} alt="" style={{width:30,height:30,borderRadius:9,objectFit:"cover",border:"2px solid #fff",marginLeft:i>0?-8:0,zIndex:treeNodes.length-i}}/>):(<div key={n.id} style={{width:30,height:30,borderRadius:9,background:gradient(n.name),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,fontWeight:800,border:"2px solid #fff",marginLeft:i>0?-8:0,zIndex:treeNodes.length-i}}>{initials(n.name)}</div>);})} {treeNodes.length>6&&<div style={{width:30,height:30,borderRadius:9,background:C.muted,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,fontWeight:800,border:"2px solid #fff",marginLeft:-8}}>+{treeNodes.length-6}</div>}</div><span style={{color:"#D1D5DB",fontSize:18}}>›</span></div></div>);})}</div>
       <button onClick={startNewTree} style={{position:"fixed",bottom:TAB_H+16,right:22,width:54,height:54,borderRadius:27,background:C.amber,border:"none",color:"#fff",fontSize:30,lineHeight:"1",cursor:"pointer",boxShadow:"0 4px 16px rgba(245,158,11,0.5)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:20,fontFamily:"inherit",fontWeight:300}}>+</button>
     </div>)}
 
