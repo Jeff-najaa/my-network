@@ -152,36 +152,146 @@ function countDesc(nodeId,nodes){const ch=(nodes||[]).filter(n=>n.parentId===nod
 function getAllDesc(nodeId,nodes){const ch=(nodes||[]).filter(n=>n.parentId===nodeId);return ch.flatMap(c=>[c,...getAllDesc(c.id,nodes)]);}
 function isDescOf(checkId,ancestorId,nodes){if(!checkId||!ancestorId)return false;const node=(nodes||[]).find(n=>n.id===checkId);if(!node||!node.parentId)return false;if(node.parentId===ancestorId)return true;return isDescOf(node.parentId,ancestorId,nodes);}
 
-function OrgChart({nodes,tnPhotos,onNodePress}){
-  if(!nodes||nodes.length===0)return null;
-  const pp=tnPhotos||{};
-  const NW=112,NH=68,HG=14,VG=46,PAD=16;
-  const childOf={};nodes.forEach(n=>{const pid=n.parentId||"__root__";(childOf[pid]=childOf[pid]||[]).push(n.id);});
-  const sw={};function calcSW(id){const ch=childOf[id]||[];if(!ch.length){sw[id]=NW;return NW;}const t=ch.reduce((s,c)=>s+calcSW(c),0)+HG*(ch.length-1);sw[id]=Math.max(NW,t);return sw[id];}
-  const roots=childOf["__root__"]||[];roots.forEach(r=>calcSW(r));
-  const pos={};function calcPos(id,cx,y){pos[id]={cx,y};const ch=childOf[id]||[];if(!ch.length)return;const tw=ch.reduce((s,c)=>s+sw[c],0)+HG*(ch.length-1);let x=cx-tw/2;ch.forEach(c=>{calcPos(c,x+sw[c]/2,y+NH+VG);x+=sw[c]+HG;});}
-  const totalW=roots.reduce((s,r)=>s+sw[r],0)+HG*(roots.length-1);let rx=0;roots.forEach(r=>{calcPos(r,rx+sw[r]/2,0);rx+=sw[r]+HG;});
-  const maxY=Object.values(pos).reduce((m,p)=>Math.max(m,p.y),0);
-  const svgW=Math.max(totalW,280)+PAD*2,svgH=maxY+NH+PAD;
+
+/* ─── ZOOMABLE CHART ────────────────────────────────────────────── */
+function ZoomableChart({children}){
+  const [tf,setTfState]=useState({s:1,x:16,y:16});
+  const tfRef=useRef({s:1,x:16,y:16});
+  const touchRef=useRef(null);
+  const containerRef=useRef(null);
+  const contentRef=useRef(null);
+
+  const setTf=useCallback((v)=>{
+    const next=typeof v==='function'?v(tfRef.current):v;
+    tfRef.current=next;setTfState(next);
+  },[]);
+
+  const doFit=useCallback(()=>{
+    const cont=containerRef.current,inner=contentRef.current;
+    if(!cont||!inner)return;
+    const cw=cont.clientWidth,ch=cont.clientHeight;
+    const iw=inner.offsetWidth,ih=inner.offsetHeight;
+    if(!iw||!ih)return;
+    const s=Math.min(1,(cw-32)/iw,(ch-32)/ih);
+    const x=Math.max(16,(cw-iw*s)/2);
+    setTf({s,x,y:16});
+  },[setTf]);
+
+  useEffect(()=>{const t=setTimeout(doFit,100);return()=>clearTimeout(t);},[doFit]);
+
+  useEffect(()=>{
+    const el=containerRef.current;if(!el)return;
+    const onMove=(e)=>{
+      e.preventDefault();
+      const t=touchRef.current;if(!t)return;
+      if(t.type==='pinch'&&e.touches.length>=2){
+        const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;
+        const ns=Math.min(3,Math.max(0.15,t.s0*(Math.hypot(dx,dy)/t.dist)));
+        const ratio=ns/t.s0;
+        setTf({s:ns,x:t.midX-(t.midX-t.x0)*ratio,y:t.midY-(t.midY-t.y0)*ratio});
+      }else if(t.type==='pan'&&e.touches.length===1){
+        setTf({s:tfRef.current.s,x:t.x0+e.touches[0].clientX-t.sx,y:t.y0+e.touches[0].clientY-t.sy});
+      }
+    };
+    el.addEventListener('touchmove',onMove,{passive:false});
+    return()=>el.removeEventListener('touchmove',onMove);
+  },[setTf]);
+
+  const onTouchStart=useCallback((e)=>{
+    const{s,x,y}=tfRef.current;
+    if(e.touches.length===2){
+      const dx=e.touches[0].clientX-e.touches[1].clientX,dy=e.touches[0].clientY-e.touches[1].clientY;
+      touchRef.current={type:'pinch',dist:Math.hypot(dx,dy),midX:(e.touches[0].clientX+e.touches[1].clientX)/2,midY:(e.touches[0].clientY+e.touches[1].clientY)/2,s0:s,x0:x,y0:y};
+    }else if(e.touches.length===1){
+      touchRef.current={type:'pan',sx:e.touches[0].clientX,sy:e.touches[0].clientY,x0:x,y0:y};
+    }
+  },[]);
+
+  const onTouchEnd=useCallback(()=>{touchRef.current=null;},[]);
+
+  const pct=Math.round(tf.s*100);
+
   return(
-    <div style={{overflowX:"auto",padding:"8px 0 16px"}}>
-      <div style={{position:"relative",width:svgW,height:svgH,margin:"0 auto",minWidth:"100%"}}>
-        <svg style={{position:"absolute",inset:0,width:"100%",height:"100%",overflow:"visible",pointerEvents:"none"}}>
-          {nodes.map(n=>{if(!n.parentId||!pos[n.parentId]||!pos[n.id])return null;const p1=pos[n.parentId],p2=pos[n.id],x1=p1.cx+PAD,y1=p1.y+NH,x2=p2.cx+PAD,y2=p2.y,my=(y1+y2)/2;return <path key={n.id} d={`M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`} stroke="#CBD5E1" strokeWidth="1.5" fill="none"/>;})}
-        </svg>
-        {nodes.map(n=>{if(!pos[n.id])return null;const p=pos[n.id],photo=pp[n.id];
-          return(<div key={n.id} onClick={()=>onNodePress(n)} style={{position:"absolute",left:p.cx-NW/2+PAD,top:p.y,width:NW,height:NH,background:"#fff",borderRadius:12,boxShadow:"0 2px 8px rgba(0,0,0,0.09)",border:"1.5px solid #E5E7EB",cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"8px 6px",overflow:"hidden",userSelect:"none"}}>
-            {photo?(<img src={photo} alt="" style={{width:30,height:30,borderRadius:15,objectFit:"cover",flexShrink:0}}/>):(<div style={{width:30,height:30,borderRadius:15,background:gradient(n.name),display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontSize:10,fontWeight:800,flexShrink:0}}>{initials(n.name)}</div>)}
-            <div style={{width:"100%",textAlign:"center",lineHeight:1.2}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#111827",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",display:"flex",alignItems:"center",justifyContent:"center",gap:3}}><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{n.name}</span>{n.flag&&<span style={{fontSize:10,flexShrink:0}}>{FLAG_EMOJI[n.flag]}</span>}</div>
-              {n.role&&<div style={{fontSize:9,color:"#6B7280",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginTop:1}}>{n.role}</div>}
-            </div>
-          </div>);
-        })}
+    <div ref={containerRef} onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}
+      style={{position:'relative',height:'calc(100vh - 152px)',overflow:'hidden',background:C.bg,touchAction:'none',userSelect:'none',WebkitUserSelect:'none'}}>
+      <div ref={contentRef} style={{position:'absolute',transformOrigin:'0 0',transform:`translate(${tf.x}px,${tf.y}px) scale(${tf.s})`,willChange:'transform'}}>
+        {children}
+      </div>
+      <div style={{position:'absolute',bottom:14,right:14,display:'flex',gap:8,alignItems:'center',zIndex:10}}>
+        <span style={{background:'rgba(0,0,0,0.35)',color:'#fff',borderRadius:8,padding:'4px 8px',fontSize:11,fontWeight:700,pointerEvents:'none'}}>{pct}%</span>
+        <button onClick={doFit} style={{background:C.white,border:`1px solid ${C.border}`,borderRadius:10,padding:'8px 14px',fontSize:12,fontWeight:700,color:C.navy,cursor:'pointer',boxShadow:'0 2px 8px rgba(0,0,0,0.14)',fontFamily:'inherit'}}>⊡ Fit</button>
       </div>
     </div>
   );
 }
+
+/* ─── ORG CHART ──────────────────────────────────────────────────── */
+function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse}){
+  if(!nodes||nodes.length===0)return null;
+  const pp=tnPhotos||{};
+  const col=collapsed||new Set();
+  const NW=112,NH=68,HG=14,VG=52,PAD=16;
+
+  // Full children map (all nodes, for hasKids check)
+  const fullChildOf={};
+  nodes.forEach(n=>{if(n.parentId)(fullChildOf[n.parentId]=fullChildOf[n.parentId]||[]).push(n.id);});
+
+  // Visible nodes: exclude those hidden by a collapsed ancestor
+  const hidden=new Set();
+  nodes.forEach(n=>{
+    let pid=n.parentId;
+    while(pid){if(col.has(pid)){hidden.add(n.id);break;}const p=nodes.find(x=>x.id===pid);pid=p?.parentId||null;}
+  });
+  const vis=nodes.filter(n=>!hidden.has(n.id));
+
+  // Layout using visible nodes only
+  const childOf={};
+  vis.forEach(n=>{const pid=n.parentId||"__root__";(childOf[pid]=childOf[pid]||[]).push(n.id);});
+  const sw={};
+  function calcSW(id){const ch=childOf[id]||[];if(!ch.length){sw[id]=NW;return NW;}const t=ch.reduce((s,c)=>s+calcSW(c),0)+HG*(ch.length-1);sw[id]=Math.max(NW,t);return sw[id];}
+  const roots=childOf["__root__"]||[];roots.forEach(r=>calcSW(r));
+  const pos={};
+  function calcPos(id,cx,y){pos[id]={cx,y};const ch=childOf[id]||[];if(!ch.length)return;const tw=ch.reduce((s,c)=>s+sw[c],0)+HG*(ch.length-1);let x=cx-tw/2;ch.forEach(c=>{calcPos(c,x+sw[c]/2,y+NH+VG);x+=sw[c]+HG;});}
+  const totalW=roots.reduce((s,r)=>s+sw[r],0)+HG*(roots.length-1);
+  let rx=0;roots.forEach(r=>{calcPos(r,rx+sw[r]/2,0);rx+=sw[r]+HG;});
+  const maxY=Object.values(pos).reduce((m,p)=>Math.max(m,p.y),0);
+  const svgW=Math.max(totalW,260)+PAD*2,svgH=maxY+NH+PAD+28;
+
+  return(
+    <div style={{position:'relative',width:svgW,height:svgH}}>
+      <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',overflow:'visible',pointerEvents:'none'}}>
+        {vis.map(n=>{if(!n.parentId||!pos[n.parentId]||!pos[n.id])return null;const p1=pos[n.parentId],p2=pos[n.id],x1=p1.cx+PAD,y1=p1.y+NH,x2=p2.cx+PAD,y2=p2.y,my=(y1+y2)/2;return <path key={n.id} d={`M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`} stroke="#CBD5E1" strokeWidth="1.5" fill="none"/>;})}
+      </svg>
+      {vis.map(n=>{
+        if(!pos[n.id])return null;
+        const p=pos[n.id],photo=pp[n.id];
+        const isCol=col.has(n.id);
+        const hasKids=!!(fullChildOf[n.id]?.length);
+        const dc=countDesc(n.id,nodes);
+        return(
+          <div key={n.id} style={{position:'absolute',left:p.cx-NW/2+PAD,top:p.y}}>
+            <div onClick={()=>onNodePress(n)}
+              style={{width:NW,height:NH,background:'#fff',borderRadius:12,boxShadow:'0 2px 8px rgba(0,0,0,0.09)',border:`1.5px solid ${isCol?C.amber:C.border}`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,padding:'8px 6px',overflow:'hidden',userSelect:'none',WebkitUserSelect:'none'}}>
+              {photo?(<img src={photo} alt="" style={{width:30,height:30,borderRadius:15,objectFit:'cover',flexShrink:0}}/>):(<div style={{width:30,height:30,borderRadius:15,background:gradient(n.name),display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:10,fontWeight:800,flexShrink:0}}>{initials(n.name)}</div>)}
+              <div style={{width:'100%',textAlign:'center',lineHeight:1.2}}>
+                <div style={{fontSize:11,fontWeight:700,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',justifyContent:'center',gap:3}}><span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.name}</span>{n.flag&&<span style={{fontSize:10,flexShrink:0}}>{FLAG_EMOJI[n.flag]}</span>}</div>
+                {n.role&&<div style={{fontSize:9,color:'#6B7280',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginTop:1}}>{n.role}</div>}
+              </div>
+            </div>
+            {hasKids&&(
+              <div onClick={e=>{e.stopPropagation();onToggleCollapse(n.id);}}
+                style={{position:'absolute',bottom:-13,left:'50%',transform:'translateX(-50%)',background:isCol?C.amber:'#E2E8F0',border:'2px solid #fff',borderRadius:10,minWidth:22,height:22,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',zIndex:5,padding:'0 5px',fontSize:isCol?9:11,fontWeight:800,color:isCol?'#fff':'#64748B',userSelect:'none',WebkitUserSelect:'none',whiteSpace:'nowrap',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}>
+                {isCol?`+${dc}`:'▾'}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+
 
 /* ─── MAIN APP ───────────────────────────────────────────────────── */
 export default function App(){
@@ -220,6 +330,7 @@ export default function App(){
   const [selNode,      setSelNode]      =useState(null);
   const [editNode,     setEditNode]     =useState(null);
   const [nodeDelCfm,   setNodeDelCfm]   =useState(false);
+  const [collapsed,    setCollapsed]    =useState(new Set());
   /* Connect view */
   const [connView,     setConnView]     =useState("list");
   const [selConnect,   setSelConnect]   =useState(null);
@@ -364,13 +475,14 @@ export default function App(){
 
   /* ── Tree CRUD ── */
   const startNewTree  =()=>{setEditTree({id:null,name:"",type:"company"});setTreeDelCfm(false);setTView("editor");};
-  const openTreeDetail=(t)=>{setSelTree(t);setShowNodePopup(false);setSelNode(null);setTreeDelCfm(false);setTView("detail");};
+  const openTreeDetail=(t)=>{setSelTree(t);setShowNodePopup(false);setSelNode(null);setTreeDelCfm(false);setCollapsed(new Set());setTView("detail");};
   const openTreeEditor=()=>{setEditTree({id:selTree.id,name:selTree.name,type:selTree.type});setTreeDelCfm(false);setTView("editor");};
   const saveTree=()=>{if(!editTree?.name?.trim())return;const isNew=!editTree.id;const td={...editTree,id:editTree.id||tuid(),name:editTree.name.trim(),nodes:isNew?[]:(selTree?.nodes||[]),createdAt:editTree.createdAt||selTree?.createdAt||new Date().toISOString()};const updated=trees.find(t=>t.id===td.id)?trees.map(t=>t.id===td.id?td:t):[...trees,td];saveTrees(updated);setSelTree(td);setTView("detail");};
   const deleteTree=()=>{(selTree?.nodes||[]).forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});setTnPhotos(p=>{const next={...p};(selTree?.nodes||[]).forEach(n=>delete next[n.id]);return next;});saveTrees(trees.filter(t=>t.id!==selTree.id));setSelTree(null);setTreeDelCfm(false);setTView("list");};
   const openAddNode=(parentId)=>{setEditNode({id:null,name:"",role:"",details:"",facts:"",flag:null,parentId:parentId??null,photo:null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
   const openEditNode=(node)=>{setEditNode({...node,flag:node.flag||null,photo:tnPhotos[node.id]||null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
   const saveNode=()=>{if(!editNode?.name?.trim())return;const isNew=!editNode.id;const nd={id:editNode.id||nid(),name:editNode.name.trim(),role:editNode.role||"",details:editNode.details||"",facts:editNode.facts||"",flag:editNode.flag||null,parentId:editNode.parentId??null,addedAt:editNode.addedAt||new Date().toISOString()};const newNodes=isNew?[...(selTree.nodes||[]),nd]:(selTree.nodes||[]).map(n=>n.id===nd.id?nd:n);const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);if(editNode.photo&&!editNode.photoCleared){try{localStorage.setItem(TN_PHOTO_PFX+nd.id,editNode.photo);setTnPhotos(p=>({...p,[nd.id]:editNode.photo}));}catch(_){}}else if(editNode.photoCleared){try{localStorage.removeItem(TN_PHOTO_PFX+nd.id);setTnPhotos(p=>{const n={...p};delete n[nd.id];return n;});}catch(_){}}setTView("detail");};
+  const toggleCollapse=(id)=>setCollapsed(prev=>{const next=new Set(prev);next.has(id)?next.delete(id):next.add(id);return next;});
   const deleteNode=(node)=>{const toDelete=[node,...getAllDesc(node.id,selTree.nodes||[])];toDelete.forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});const delIds=new Set(toDelete.map(n=>n.id));const newNodes=(selTree.nodes||[]).filter(n=>!delIds.has(n.id));const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);setTnPhotos(p=>{const next={...p};toDelete.forEach(n=>delete next[n.id]);return next;});setShowNodePopup(false);setSelNode(null);setNodeDelCfm(false);};
     const startNewConnect  =()=>{setEditConnect({id:null,name:"",note:"",memberIds:[]});setConnPickSearch("");setConnDelCfm(false);setConnView("editor");};
   const openConnectDetail=(g)=>{setSelConnect(g);setConnDelCfm(false);setConnView("detail");};
@@ -566,18 +678,18 @@ export default function App(){
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}><NavBack onClick={()=>{setShowNodePopup(false);setSelNode(null);setTView("list");}}/><button onClick={openTreeEditor} style={{background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",borderRadius:9,padding:"7px 14px",cursor:"pointer",fontSize:13,fontWeight:700,fontFamily:"inherit"}}>✏️ Rename</button></div>
         <div style={{marginTop:12}}><div style={{color:"#fff",fontSize:22,fontWeight:800,letterSpacing:-0.5}}>{selTree.name}</div><div style={{marginTop:7,display:"flex",gap:6,flexWrap:"wrap"}}><MiniChip bg="rgba(255,255,255,0.15)" fg="#fff">{typeInfo.icon} {typeInfo.label}</MiniChip><MiniChip bg="rgba(255,255,255,0.1)" fg="rgba(255,255,255,0.75)">{nodes.length} {nodes.length===1?"person":"people"}</MiniChip></div></div>
       </div>
-      <div style={{padding:"12px 13px 80px"}}>
-        {nodes.length===0?(
-          <div style={{textAlign:"center",padding:"52px 24px"}}>
-            <div style={{fontSize:48,marginBottom:12}}>🌱</div>
-            <div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:8}}>This tree is empty</div>
-            <div style={{fontSize:13,color:C.muted,marginBottom:24,lineHeight:1.6}}>Tap the button below to add the first person.</div>
-            <button onClick={()=>openAddNode(null)} style={{padding:"13px 28px",background:C.amber,border:"none",borderRadius:13,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(245,158,11,0.4)"}}>+ Add First Person</button>
-          </div>
-        ):(
-          <OrgChart nodes={nodes} tnPhotos={tnPhotos} onNodePress={node=>{setSelNode(node);setShowNodePopup(true);setNodeDelCfm(false);}}/>
-        )}
-      </div>
+      {nodes.length===0?(
+        <div style={{textAlign:"center",padding:"52px 24px"}}>
+          <div style={{fontSize:48,marginBottom:12}}>🌱</div>
+          <div style={{fontSize:17,fontWeight:700,color:"#374151",marginBottom:8}}>This tree is empty</div>
+          <div style={{fontSize:13,color:C.muted,marginBottom:24,lineHeight:1.6}}>Tap the button below to add the first person.</div>
+          <button onClick={()=>openAddNode(null)} style={{padding:"13px 28px",background:C.amber,border:"none",borderRadius:13,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(245,158,11,0.4)"}}>+ Add First Person</button>
+        </div>
+      ):(
+        <ZoomableChart>
+          <OrgChart nodes={nodes} tnPhotos={tnPhotos} collapsed={collapsed} onToggleCollapse={toggleCollapse} onNodePress={node=>{setSelNode(node);setShowNodePopup(true);setNodeDelCfm(false);}}/>
+        </ZoomableChart>
+      )}
 
       {/* Node popup */}
       {showNodePopup&&selNode&&(
