@@ -246,11 +246,13 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReord
       const el=document.elementFromPoint(t.clientX,t.clientY);
       const tid=el?.closest('[data-nid]')?.getAttribute('data-nid')||null;
       const valid=tid&&tid!==drag.node.id&&!isDescOf(tid,drag.node.id,nodes);
-      setDrag(p=>({...p,ghostX:t.clientX,ghostY:t.clientY,targetId:valid?tid:null}));
+      let insertAfter=false;
+      if(valid&&tid){const r=document.querySelector(`[data-nid="${tid}"]`)?.getBoundingClientRect();if(r)insertAfter=t.clientX>r.left+r.width/2;}
+      setDrag(p=>({...p,ghostX:t.clientX,ghostY:t.clientY,targetId:valid?tid:null,insertAfter}));
     };
     const onEnd=()=>{
       if(dragActiveRef)dragActiveRef.current=false;
-      if(drag.targetId)onReorder(drag.node.id,drag.targetId);
+      if(drag.targetId)onReorder(drag.node.id,drag.targetId,drag.insertAfter);
       setDrag(null);
     };
     document.addEventListener('touchmove',onMove,{passive:true});
@@ -317,7 +319,7 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReord
               if(!didDragRef.current&&!drag)onNodePress(n);
               didDragRef.current=false;
             }}>
-            <div style={{width:NW,height:NH,background:isTarget?'#ECFDF5':'#fff',borderRadius:12,boxShadow:isTarget?'0 0 0 2.5px #10B981':'0 2px 8px rgba(0,0,0,0.09)',border:`1.5px solid ${isTarget?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,padding:'8px 6px',overflow:'hidden',userSelect:'none',WebkitUserSelect:'none',opacity:isDragged?0.3:1,transition:'opacity 0.15s,border-color 0.15s,background 0.15s'}}>
+            <div style={(()=>{const isSib=isTarget&&drag?.node.parentId===n.parentId;const isRP=isTarget&&!isSib;const bef=isSib&&!drag?.insertAfter,aft=isSib&&drag?.insertAfter;return{width:NW,height:NH,background:isRP?'#ECFDF5':'#fff',borderRadius:12,boxShadow:isRP?'0 0 0 2.5px #10B981':'0 2px 8px rgba(0,0,0,0.09)',borderTop:`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderBottom:`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderLeft:bef?'5px solid #10B981':`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderRight:aft?'5px solid #10B981':`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,padding:'8px 6px',overflow:'hidden',userSelect:'none',WebkitUserSelect:'none',opacity:isDragged?0.3:1,transition:'opacity 0.15s,border-color 0.15s,background 0.15s'};})()} >
               {photo?(<img src={photo} alt="" style={{width:30,height:30,borderRadius:15,objectFit:'cover',flexShrink:0}}/>):(<div style={{width:30,height:30,borderRadius:15,background:gradient(n.name),display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:10,fontWeight:800,flexShrink:0}}>{initials(n.name)}</div>)}
               <div style={{width:'100%',textAlign:'center',lineHeight:1.2}}>
                 <div style={{fontSize:11,fontWeight:700,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',justifyContent:'center',gap:3}}><span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.name}</span>{n.flag&&<span style={{fontSize:10,flexShrink:0}}>{FLAG_EMOJI[n.flag]}</span>}</div>
@@ -537,7 +539,28 @@ export default function App(){
   const openEditNode=(node)=>{setEditNode({...node,flag:node.flag||null,photo:tnPhotos[node.id]||null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
   const saveNode=()=>{if(!editNode?.name?.trim())return;const isNew=!editNode.id;const nd={id:editNode.id||nid(),name:editNode.name.trim(),role:editNode.role||"",details:editNode.details||"",facts:editNode.facts||"",flag:editNode.flag||null,parentId:editNode.parentId??null,addedAt:editNode.addedAt||new Date().toISOString()};const newNodes=isNew?[...(selTree.nodes||[]),nd]:(selTree.nodes||[]).map(n=>n.id===nd.id?nd:n);const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);if(editNode.photo&&!editNode.photoCleared){try{localStorage.setItem(TN_PHOTO_PFX+nd.id,editNode.photo);setTnPhotos(p=>({...p,[nd.id]:editNode.photo}));}catch(_){}}else if(editNode.photoCleared){try{localStorage.removeItem(TN_PHOTO_PFX+nd.id);setTnPhotos(p=>{const n={...p};delete n[nd.id];return n;});}catch(_){}}setTView("detail");};
   const toggleCollapse=(id)=>setCollapsed(prev=>{const next=new Set(prev);next.has(id)?next.delete(id):next.add(id);return next;});
-  const reorderNode=(draggedId,targetId)=>{if(!draggedId||!targetId||draggedId===targetId)return;if(isDescOf(targetId,draggedId,selTree.nodes||[]))return;const newNodes=(selTree.nodes||[]).map(n=>n.id===draggedId?{...n,parentId:targetId}:n);const updTree={...selTree,nodes:newNodes};saveTrees(trees.map(t=>t.id===selTree.id?updTree:t));setSelTree(updTree);};
+  const reorderNode=(draggedId,targetId,insertAfter)=>{
+    if(!draggedId||!targetId||draggedId===targetId)return;
+    const cur=selTree.nodes||[];
+    const dragged=cur.find(n=>n.id===draggedId);
+    const target=cur.find(n=>n.id===targetId);
+    if(!dragged||!target)return;
+    if(isDescOf(targetId,draggedId,cur))return;
+    let newNodes;
+    if(dragged.parentId===target.parentId){
+      // Same level — reorder among siblings
+      const without=cur.filter(n=>n.id!==draggedId);
+      const idx=without.findIndex(n=>n.id===targetId);
+      without.splice(insertAfter?idx+1:idx,0,dragged);
+      newNodes=without;
+    }else{
+      // Different level — reparent
+      newNodes=cur.map(n=>n.id===draggedId?{...n,parentId:targetId}:n);
+    }
+    const updTree={...selTree,nodes:newNodes};
+    saveTrees(trees.map(t=>t.id===selTree.id?updTree:t));
+    setSelTree(updTree);
+  };
   const deleteNode=(node)=>{const toDelete=[node,...getAllDesc(node.id,selTree.nodes||[])];toDelete.forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});const delIds=new Set(toDelete.map(n=>n.id));const newNodes=(selTree.nodes||[]).filter(n=>!delIds.has(n.id));const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);setTnPhotos(p=>{const next={...p};toDelete.forEach(n=>delete next[n.id]);return next;});setShowNodePopup(false);setSelNode(null);setNodeDelCfm(false);};
     const startNewConnect  =()=>{setEditConnect({id:null,name:"",note:"",memberIds:[]});setConnPickSearch("");setConnDelCfm(false);setConnView("editor");};
   const openConnectDetail=(g)=>{setSelConnect(g);setConnDelCfm(false);setConnView("detail");};
