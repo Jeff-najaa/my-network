@@ -231,7 +231,7 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReord
   if(!nodes||nodes.length===0)return null;
   const pp=tnPhotos||{};
   const col=collapsed||new Set();
-  const NW=112,NH=68,HG=14,VG=52,PAD=16;
+  const NW=112,NH=68,PNW=78,PNH=48,HG=14,VG=52,PAD=16;
   const [drag,setDrag]=useState(null);
   const lpRef=useRef(null);
   const lpStartRef=useRef(null);
@@ -269,10 +269,12 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReord
   const childOf={};
   vis.forEach(n=>{const pid=n.parentId||"__root__";(childOf[pid]=childOf[pid]||[]).push(n.id);});
   const sw={};
-  function calcSW(id){const ch=childOf[id]||[];if(!ch.length){sw[id]=NW;return NW;}const t=ch.reduce((s,c)=>s+calcSW(c),0)+HG*(ch.length-1);sw[id]=Math.max(NW,t);return sw[id];}
+  const nwOf=id=>(vis.find(n=>n.id===id)?.partnerOf?PNW:NW);
+  const nhOf=id=>(vis.find(n=>n.id===id)?.partnerOf?PNH:NH);
+  function calcSW(id){const ch=childOf[id]||[];if(!ch.length){sw[id]=nwOf(id);return sw[id];}const t=ch.reduce((s,c)=>s+calcSW(c),0)+HG*(ch.length-1);sw[id]=Math.max(nwOf(id),t);return sw[id];}
   const roots=childOf["__root__"]||[];roots.forEach(r=>calcSW(r));
   const pos={};
-  function calcPos(id,cx,y){pos[id]={cx,y};const ch=childOf[id]||[];if(!ch.length)return;const tw=ch.reduce((s,c)=>s+sw[c],0)+HG*(ch.length-1);let x=cx-tw/2;ch.forEach(c=>{calcPos(c,x+sw[c]/2,y+NH+VG);x+=sw[c]+HG;});}
+  function calcPos(id,cx,y){pos[id]={cx,y};const ch=childOf[id]||[];if(!ch.length)return;const tw=ch.reduce((s,c)=>s+sw[c],0)+HG*(ch.length-1);let x=cx-tw/2;ch.forEach(c=>{calcPos(c,x+sw[c]/2,y+nhOf(id)+VG);x+=sw[c]+HG;});}
   const totalW=roots.reduce((s,r)=>s+sw[r],0)+HG*(roots.length-1);
   let rx=0;roots.forEach(r=>{calcPos(r,rx+sw[r]/2,0);rx+=sw[r]+HG;});
   const maxY=Object.values(pos).reduce((m,p)=>Math.max(m,p.y),0);
@@ -294,7 +296,9 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReord
           if(!n.partnerOf||!pos[n.partnerOf]||!pos[n.id])return null;
           const pa=pos[n.id],pb=pos[n.partnerOf];
           const [lp,rp]=pa.cx<pb.cx?[pa,pb]:[pb,pa];
-          const x1=lp.cx+PAD+NW/2,x2=rp.cx+PAD-NW/2,y=lp.y+NH/2,mx=(x1+x2)/2;
+          const lIsPartner=lp===pa;
+          const x1=lp.cx+PAD+(lIsPartner?PNW:NW)/2,x2=rp.cx+PAD-(lIsPartner?NW:PNW)/2;
+          const y=lp.y+PNH/2,mx=(x1+x2)/2;
           return <g key={`pt-${n.id}`}>
             <line x1={x1} y1={y} x2={x2} y2={y} stroke="#FDA4AF" strokeWidth="2"/>
             <text x={mx} y={y+4} textAnchor="middle" fontSize="10" style={{userSelect:'none'}}>❤️</text>
@@ -307,10 +311,11 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReord
         const isCol=col.has(n.id);
         const hasKids=!!(fullChildOf[n.id]?.length);
         const dc=countDesc(n.id,nodes);
+        const nw=n.partnerOf?PNW:NW;const nh=n.partnerOf?PNH:NH;
         const isDragged=drag?.node.id===n.id;
         const isTarget=drag?.targetId===n.id;
         return(
-          <div key={n.id} data-nid={n.id} style={{position:'absolute',left:p.cx-NW/2+PAD,top:p.y}}
+          <div key={n.id} data-nid={n.id} style={{position:'absolute',left:p.cx-nw/2+PAD,top:p.y}}
             onTouchStart={e=>{
               if(drag)return;
               const t=e.touches[0];
@@ -334,16 +339,16 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReord
               if(!didDragRef.current&&!drag)onNodePress(n);
               didDragRef.current=false;
             }}>
-            <div style={(()=>{const isSib=isTarget&&drag?.node.parentId===n.parentId;const isRP=isTarget&&!isSib;const bef=isSib&&!drag?.insertAfter,aft=isSib&&drag?.insertAfter;return{width:NW,height:NH,background:isRP?'#ECFDF5':'#fff',borderRadius:12,boxShadow:isRP?'0 0 0 2.5px #10B981':'0 2px 8px rgba(0,0,0,0.09)',borderTop:`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderBottom:`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderLeft:bef?'5px solid #10B981':`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderRight:aft?'5px solid #10B981':`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,padding:'8px 6px',overflow:'hidden',userSelect:'none',WebkitUserSelect:'none',opacity:isDragged?0.3:1,transition:'opacity 0.15s,border-color 0.15s,background 0.15s'};})()} >
-              {photo?(<img src={photo} alt="" style={{width:30,height:30,borderRadius:15,objectFit:'cover',flexShrink:0}}/>):(<div style={{width:30,height:30,borderRadius:15,background:gradient(n.name),display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:10,fontWeight:800,flexShrink:0}}>{initials(n.name)}</div>)}
+            <div style={(()=>{const isSib=isTarget&&drag?.node.parentId===n.parentId;const isRP=isTarget&&!isSib;const bef=isSib&&!drag?.insertAfter,aft=isSib&&drag?.insertAfter;return{width:nw,height:nh,background:isRP?'#ECFDF5':'#fff',borderRadius:12,boxShadow:isRP?'0 0 0 2.5px #10B981':'0 2px 8px rgba(0,0,0,0.09)',borderTop:`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderBottom:`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderLeft:bef?'5px solid #10B981':`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,borderRight:aft?'5px solid #10B981':`1.5px solid ${isRP?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,padding:'8px 6px',overflow:'hidden',userSelect:'none',WebkitUserSelect:'none',opacity:isDragged?0.3:1,transition:'opacity 0.15s,border-color 0.15s,background 0.15s'};})()} >
+              {(()=>{const ps=n.partnerOf?0.7:1;const cr=Math.round(30*ps),br=Math.round(15*ps);return photo?(<img src={photo} alt="" style={{width:cr,height:cr,borderRadius:br,objectFit:'cover',flexShrink:0}}/>):(<div style={{width:cr,height:cr,borderRadius:br,background:gradient(n.name),display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:Math.round(10*ps),fontWeight:800,flexShrink:0}}>{initials(n.name)}</div>);})()}
               <div style={{width:'100%',textAlign:'center',lineHeight:1.2}}>
-                <div style={{fontSize:11,fontWeight:700,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',justifyContent:'center',gap:3}}><span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.name}</span>{n.flag&&<span style={{fontSize:10,flexShrink:0}}>{FLAG_EMOJI[n.flag]}</span>}</div>
-                {n.role&&<div style={{fontSize:9,color:'#6B7280',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginTop:1}}>{n.role}</div>}
+                <div style={{fontSize:n.partnerOf?9:11,fontWeight:700,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',justifyContent:'center',gap:3}}><span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.name}</span>{n.flag&&<span style={{fontSize:n.partnerOf?8:10,flexShrink:0}}>{FLAG_EMOJI[n.flag]}</span>}</div>
+                {n.role&&<div style={{fontSize:n.partnerOf?7:9,color:'#6B7280',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginTop:1}}>{n.role}</div>}
               </div>
             </div>
             {hasKids&&(
               <div onTouchStart={e=>{e.stopPropagation();if(lpRef.current){clearTimeout(lpRef.current);lpRef.current=null;}}} onClick={e=>{e.stopPropagation();onToggleCollapse(n.id);}}
-                style={{position:'absolute',bottom:-13,left:'50%',transform:'translateX(-50%)',background:isCol?'#F59E0B':'#E2E8F0',border:'2px solid #fff',borderRadius:10,minWidth:22,height:22,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',zIndex:5,padding:'0 5px',fontSize:isCol?9:11,fontWeight:800,color:isCol?'#fff':'#64748B',userSelect:'none',WebkitUserSelect:'none',whiteSpace:'nowrap',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}>
+                style={{position:'absolute',bottom:n.partnerOf?-11:-13,left:'50%',transform:'translateX(-50%)',background:isCol?'#F59E0B':'#E2E8F0',border:'2px solid #fff',borderRadius:10,minWidth:22,height:22,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',zIndex:5,padding:'0 5px',fontSize:isCol?9:11,fontWeight:800,color:isCol?'#fff':'#64748B',userSelect:'none',WebkitUserSelect:'none',whiteSpace:'nowrap',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}>
                 {isCol?`+${dc}`:'▾'}
               </div>
             )}
