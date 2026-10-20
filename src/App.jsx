@@ -284,7 +284,22 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReord
   return(<>
     <div style={{position:'relative',width:svgW,height:svgH}}>
       <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',overflow:'visible',pointerEvents:'none'}}>
-        {vis.map(n=>{if(!n.parentId||!pos[n.parentId]||!pos[n.id])return null;const p1=pos[n.parentId],p2=pos[n.id],x1=p1.cx+PAD,y1=p1.y+NH,x2=p2.cx+PAD,y2=p2.y,my=(y1+y2)/2;return <path key={n.id} d={`M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`} stroke="#CBD5E1" strokeWidth="1.5" fill="none"/>;})}
+        {vis.map(n=>{
+          if(!n.parentId||!pos[n.parentId]||!pos[n.id])return null;
+          if(n.partnerOf&&pos[n.partnerOf])return null;
+          const p1=pos[n.parentId],p2=pos[n.id],x1=p1.cx+PAD,y1=p1.y+NH,x2=p2.cx+PAD,y2=p2.y,my=(y1+y2)/2;
+          return <path key={n.id} d={`M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`} stroke="#CBD5E1" strokeWidth="1.5" fill="none"/>;
+        })}
+        {vis.map(n=>{
+          if(!n.partnerOf||!pos[n.partnerOf]||!pos[n.id])return null;
+          const pa=pos[n.id],pb=pos[n.partnerOf];
+          const [lp,rp]=pa.cx<pb.cx?[pa,pb]:[pb,pa];
+          const x1=lp.cx+PAD+NW/2,x2=rp.cx+PAD-NW/2,y=lp.y+NH/2,mx=(x1+x2)/2;
+          return <g key={`pt-${n.id}`}>
+            <line x1={x1} y1={y} x2={x2} y2={y} stroke="#FDA4AF" strokeWidth="2"/>
+            <text x={mx} y={y+4} textAnchor="middle" fontSize="10" style={{userSelect:'none'}}>❤️</text>
+          </g>;
+        })}
       </svg>
       {vis.map(n=>{
         if(!pos[n.id])return null;
@@ -535,9 +550,19 @@ export default function App(){
   const openTreeEditor=()=>{setEditTree({id:selTree.id,name:selTree.name,type:selTree.type});setTreeDelCfm(false);setTView("editor");};
   const saveTree=()=>{if(!editTree?.name?.trim())return;const isNew=!editTree.id;const td={...editTree,id:editTree.id||tuid(),name:editTree.name.trim(),nodes:isNew?[]:(selTree?.nodes||[]),createdAt:editTree.createdAt||selTree?.createdAt||new Date().toISOString()};const updated=trees.find(t=>t.id===td.id)?trees.map(t=>t.id===td.id?td:t):[...trees,td];saveTrees(updated);setSelTree(td);setTView("detail");};
   const deleteTree=()=>{(selTree?.nodes||[]).forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});setTnPhotos(p=>{const next={...p};(selTree?.nodes||[]).forEach(n=>delete next[n.id]);return next;});saveTrees(trees.filter(t=>t.id!==selTree.id));setSelTree(null);setTreeDelCfm(false);setTView("list");};
-  const openAddNode=(parentId)=>{setEditNode({id:null,name:"",role:"",details:"",facts:"",flag:null,parentId:parentId??null,photo:null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
-  const openEditNode=(node)=>{setEditNode({...node,flag:node.flag||null,photo:tnPhotos[node.id]||null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
-  const saveNode=()=>{if(!editNode?.name?.trim())return;const isNew=!editNode.id;const nd={id:editNode.id||nid(),name:editNode.name.trim(),role:editNode.role||"",details:editNode.details||"",facts:editNode.facts||"",flag:editNode.flag||null,parentId:editNode.parentId??null,addedAt:editNode.addedAt||new Date().toISOString()};const newNodes=isNew?[...(selTree.nodes||[]),nd]:(selTree.nodes||[]).map(n=>n.id===nd.id?nd:n);const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);if(editNode.photo&&!editNode.photoCleared){try{localStorage.setItem(TN_PHOTO_PFX+nd.id,editNode.photo);setTnPhotos(p=>({...p,[nd.id]:editNode.photo}));}catch(_){}}else if(editNode.photoCleared){try{localStorage.removeItem(TN_PHOTO_PFX+nd.id);setTnPhotos(p=>{const n={...p};delete n[nd.id];return n;});}catch(_){}}setTView("detail");};
+  const openAddNode=(parentId,partnerOf=null)=>{setEditNode({id:null,name:"",role:"",details:"",facts:"",flag:null,parentId:parentId??null,partnerOf:partnerOf??null,photo:null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
+  const openEditNode=(node)=>{setEditNode({...node,flag:node.flag||null,partnerOf:node.partnerOf||null,photo:tnPhotos[node.id]||null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
+  const saveNode=()=>{if(!editNode?.name?.trim())return;const isNew=!editNode.id;const nd={id:editNode.id||nid(),name:editNode.name.trim(),role:editNode.role||"",details:editNode.details||"",facts:editNode.facts||"",flag:editNode.flag||null,partnerOf:editNode.partnerOf||null,parentId:editNode.parentId??null,addedAt:editNode.addedAt||new Date().toISOString()};
+    let newNodes;
+    if(isNew&&editNode.partnerOf){
+      const pi=(selTree.nodes||[]).findIndex(n=>n.id===editNode.partnerOf);
+      newNodes=[...(selTree.nodes||[])];
+      if(pi>=0)newNodes.splice(pi+1,0,nd);else newNodes.push(nd);
+    }else if(isNew){
+      newNodes=[...(selTree.nodes||[]),nd];
+    }else{
+      newNodes=(selTree.nodes||[]).map(n=>n.id===nd.id?nd:n);
+    }const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);if(editNode.photo&&!editNode.photoCleared){try{localStorage.setItem(TN_PHOTO_PFX+nd.id,editNode.photo);setTnPhotos(p=>({...p,[nd.id]:editNode.photo}));}catch(_){}}else if(editNode.photoCleared){try{localStorage.removeItem(TN_PHOTO_PFX+nd.id);setTnPhotos(p=>{const n={...p};delete n[nd.id];return n;});}catch(_){}}setTView("detail");};
   const toggleCollapse=(id)=>setCollapsed(prev=>{const next=new Set(prev);next.has(id)?next.delete(id):next.add(id);return next;});
   const reorderNode=(draggedId,targetId,insertAfter)=>{
     if(!draggedId||!targetId||draggedId===targetId)return;
@@ -561,7 +586,7 @@ export default function App(){
     saveTrees(trees.map(t=>t.id===selTree.id?updTree:t));
     setSelTree(updTree);
   };
-  const deleteNode=(node)=>{const toDelete=[node,...getAllDesc(node.id,selTree.nodes||[])];toDelete.forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});const delIds=new Set(toDelete.map(n=>n.id));const newNodes=(selTree.nodes||[]).filter(n=>!delIds.has(n.id));const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);setTnPhotos(p=>{const next={...p};toDelete.forEach(n=>delete next[n.id]);return next;});setShowNodePopup(false);setSelNode(null);setNodeDelCfm(false);};
+  const deleteNode=(node)=>{const toDelete=[node,...getAllDesc(node.id,selTree.nodes||[])];toDelete.forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});const delIds=new Set(toDelete.map(n=>n.id));const newNodes=(selTree.nodes||[]).filter(n=>!delIds.has(n.id)).map(n=>n.partnerOf&&delIds.has(n.partnerOf)?{...n,partnerOf:null}:n);const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);setTnPhotos(p=>{const next={...p};toDelete.forEach(n=>delete next[n.id]);return next;});setShowNodePopup(false);setSelNode(null);setNodeDelCfm(false);};
     const startNewConnect  =()=>{setEditConnect({id:null,name:"",note:"",memberIds:[]});setConnPickSearch("");setConnDelCfm(false);setConnView("editor");};
   const openConnectDetail=(g)=>{setSelConnect(g);setConnDelCfm(false);setConnView("detail");};
   const openConnectEditor=()=>{setEditConnect({...selConnect,memberIds:[...selConnect.memberIds]});setConnPickSearch("");setConnDelCfm(false);setConnView("editor");};
@@ -729,6 +754,7 @@ export default function App(){
             <button onClick={()=>tnPhotoRef.current?.click()} style={{padding:"7px 18px",background:"#F3F4F6",border:`1px solid ${C.border}`,borderRadius:9,fontSize:13,fontWeight:600,color:C.text,cursor:"pointer",fontFamily:"inherit"}}>{editNode.photo?"Change Photo":"Add Photo"}</button>
           </div>
         </InfoCard>
+        {editNode.partnerOf&&(()=>{const pn=(selTree?.nodes||[]).find(n=>n.id===editNode.partnerOf);return pn?(<div style={{background:"#FFF1F2",border:"1px solid #FDA4AF",borderRadius:12,padding:"10px 14px",fontSize:13,color:"#BE123C",fontWeight:600}}>❤️ Adding as partner of {pn.name}</div>):null;})()}
         <InfoCard><FL>Name *</FL><input value={editNode.name||""} onChange={e=>setEditNode(p=>({...p,name:e.target.value}))} placeholder="Person's name…" style={INP}/></InfoCard>
         <InfoCard><FL>Role</FL><input value={editNode.role||""} onChange={e=>setEditNode(p=>({...p,role:e.target.value}))} placeholder="e.g. CEO, Father, Team Lead…" style={INP}/></InfoCard>
         <InfoCard><FL>Details</FL><textarea value={editNode.details||""} onChange={e=>setEditNode(p=>({...p,details:e.target.value}))} rows={3} placeholder="Background, experience, context…" style={{...INP,resize:"none",lineHeight:1.55}}/></InfoCard>
@@ -789,6 +815,7 @@ export default function App(){
                   <button onClick={()=>openAddNode(selNode.id)} style={{flex:1,padding:"10px",background:"#F0FDF4",border:"1.5px solid #166534",borderRadius:11,color:"#166534",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Sub-level</button>
                   <button onClick={()=>openAddNode(selNode.parentId)} style={{flex:1,padding:"10px",background:"#EFF6FF",border:"1.5px solid #1D4ED8",borderRadius:11,color:"#1D4ED8",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>+ Sibling</button>
                 </div>
+                <button onClick={()=>openAddNode(selNode.parentId,selNode.id)} style={{padding:"10px",background:"#FFF1F2",border:"1.5px solid #FDA4AF",borderRadius:11,color:"#BE123C",fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit",width:"100%"}}>❤️ Add Partner</button>
                 <button onClick={()=>setNodeDelCfm(true)} style={{padding:"10px",background:C.redBg,border:"none",borderRadius:11,color:C.red,fontSize:13,fontWeight:700,cursor:"pointer",fontFamily:"inherit"}}>Remove</button>
               </div>
             ):(
