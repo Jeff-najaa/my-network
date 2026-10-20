@@ -154,7 +154,7 @@ function isDescOf(checkId,ancestorId,nodes){if(!checkId||!ancestorId)return fals
 
 
 /* ─── ZOOMABLE CHART ────────────────────────────────────────────── */
-function ZoomableChart({children}){
+function ZoomableChart({children,dragActiveRef}){
   const [tf,setTfState]=useState({s:1,x:16,y:16});
   const tfRef=useRef({s:1,x:16,y:16});
   const touchRef=useRef(null);
@@ -182,6 +182,7 @@ function ZoomableChart({children}){
   useEffect(()=>{
     const el=containerRef.current;if(!el)return;
     const onMove=(e)=>{
+      if(dragActiveRef?.current)return;
       e.preventDefault();
       const t=touchRef.current;if(!t)return;
       if(t.type==='pinch'&&e.touches.length>=2){
@@ -226,25 +227,43 @@ function ZoomableChart({children}){
 }
 
 /* ─── ORG CHART ──────────────────────────────────────────────────── */
-function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse}){
+function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse,onReorder,dragActiveRef}){
   if(!nodes||nodes.length===0)return null;
   const pp=tnPhotos||{};
   const col=collapsed||new Set();
   const NW=112,NH=68,HG=14,VG=52,PAD=16;
+  const [drag,setDrag]=useState(null);
+  const lpRef=useRef(null);
+  const lpStartRef=useRef(null);
+  const didDragRef=useRef(false);
 
-  // Full children map (all nodes, for hasKids check)
+  useEffect(()=>()=>{if(lpRef.current)clearTimeout(lpRef.current);},[]);
+
+  useEffect(()=>{
+    if(!drag)return;
+    const onMove=(e)=>{
+      const t=e.touches[0];
+      const el=document.elementFromPoint(t.clientX,t.clientY);
+      const tid=el?.closest('[data-nid]')?.getAttribute('data-nid')||null;
+      const valid=tid&&tid!==drag.node.id&&!isDescOf(tid,drag.node.id,nodes);
+      setDrag(p=>({...p,ghostX:t.clientX,ghostY:t.clientY,targetId:valid?tid:null}));
+    };
+    const onEnd=()=>{
+      if(dragActiveRef)dragActiveRef.current=false;
+      if(drag.targetId)onReorder(drag.node.id,drag.targetId);
+      setDrag(null);
+    };
+    document.addEventListener('touchmove',onMove,{passive:true});
+    document.addEventListener('touchend',onEnd);
+    document.addEventListener('touchcancel',onEnd);
+    return()=>{document.removeEventListener('touchmove',onMove);document.removeEventListener('touchend',onEnd);document.removeEventListener('touchcancel',onEnd);};
+  },[drag,nodes,onReorder,dragActiveRef]);
+
   const fullChildOf={};
   nodes.forEach(n=>{if(n.parentId)(fullChildOf[n.parentId]=fullChildOf[n.parentId]||[]).push(n.id);});
-
-  // Visible nodes: exclude those hidden by a collapsed ancestor
   const hidden=new Set();
-  nodes.forEach(n=>{
-    let pid=n.parentId;
-    while(pid){if(col.has(pid)){hidden.add(n.id);break;}const p=nodes.find(x=>x.id===pid);pid=p?.parentId||null;}
-  });
+  nodes.forEach(n=>{let pid=n.parentId;while(pid){if(col.has(pid)){hidden.add(n.id);break;}const p=nodes.find(x=>x.id===pid);pid=p?.parentId||null;}});
   const vis=nodes.filter(n=>!hidden.has(n.id));
-
-  // Layout using visible nodes only
   const childOf={};
   vis.forEach(n=>{const pid=n.parentId||"__root__";(childOf[pid]=childOf[pid]||[]).push(n.id);});
   const sw={};
@@ -257,7 +276,10 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse}){
   const maxY=Object.values(pos).reduce((m,p)=>Math.max(m,p.y),0);
   const svgW=Math.max(totalW,260)+PAD*2,svgH=maxY+NH+PAD+28;
 
-  return(
+  const dn=drag?.node;
+  const gPhoto=dn?pp[dn.id]:null;
+
+  return(<>
     <div style={{position:'relative',width:svgW,height:svgH}}>
       <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',overflow:'visible',pointerEvents:'none'}}>
         {vis.map(n=>{if(!n.parentId||!pos[n.parentId]||!pos[n.id])return null;const p1=pos[n.parentId],p2=pos[n.id],x1=p1.cx+PAD,y1=p1.y+NH,x2=p2.cx+PAD,y2=p2.y,my=(y1+y2)/2;return <path key={n.id} d={`M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`} stroke="#CBD5E1" strokeWidth="1.5" fill="none"/>;})}
@@ -268,10 +290,34 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse}){
         const isCol=col.has(n.id);
         const hasKids=!!(fullChildOf[n.id]?.length);
         const dc=countDesc(n.id,nodes);
+        const isDragged=drag?.node.id===n.id;
+        const isTarget=drag?.targetId===n.id;
         return(
-          <div key={n.id} style={{position:'absolute',left:p.cx-NW/2+PAD,top:p.y}}>
-            <div onClick={()=>onNodePress(n)}
-              style={{width:NW,height:NH,background:'#fff',borderRadius:12,boxShadow:'0 2px 8px rgba(0,0,0,0.09)',border:`1.5px solid ${isCol?C.amber:C.border}`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,padding:'8px 6px',overflow:'hidden',userSelect:'none',WebkitUserSelect:'none'}}>
+          <div key={n.id} data-nid={n.id} style={{position:'absolute',left:p.cx-NW/2+PAD,top:p.y}}
+            onTouchStart={e=>{
+              if(drag)return;
+              const t=e.touches[0];
+              lpStartRef.current={x:t.clientX,y:t.clientY};
+              didDragRef.current=false;
+              lpRef.current=setTimeout(()=>{
+                if(navigator.vibrate)navigator.vibrate(45);
+                if(dragActiveRef)dragActiveRef.current=true;
+                didDragRef.current=true;
+                setDrag({node:n,ghostX:t.clientX,ghostY:t.clientY,targetId:null});
+                lpRef.current=null;
+              },500);
+            }}
+            onTouchMove={e=>{
+              if(!lpRef.current)return;
+              const t=e.touches[0],s=lpStartRef.current;
+              if(s&&Math.hypot(t.clientX-s.x,t.clientY-s.y)>8){clearTimeout(lpRef.current);lpRef.current=null;}
+            }}
+            onTouchEnd={e=>{
+              if(lpRef.current){clearTimeout(lpRef.current);lpRef.current=null;}
+              if(!didDragRef.current&&!drag)onNodePress(n);
+              didDragRef.current=false;
+            }}>
+            <div style={{width:NW,height:NH,background:isTarget?'#ECFDF5':'#fff',borderRadius:12,boxShadow:isTarget?'0 0 0 2.5px #10B981':'0 2px 8px rgba(0,0,0,0.09)',border:`1.5px solid ${isTarget?'#10B981':isCol?'#F59E0B':'#E5E7EB'}`,cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,padding:'8px 6px',overflow:'hidden',userSelect:'none',WebkitUserSelect:'none',opacity:isDragged?0.3:1,transition:'opacity 0.15s,border-color 0.15s,background 0.15s'}}>
               {photo?(<img src={photo} alt="" style={{width:30,height:30,borderRadius:15,objectFit:'cover',flexShrink:0}}/>):(<div style={{width:30,height:30,borderRadius:15,background:gradient(n.name),display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:10,fontWeight:800,flexShrink:0}}>{initials(n.name)}</div>)}
               <div style={{width:'100%',textAlign:'center',lineHeight:1.2}}>
                 <div style={{fontSize:11,fontWeight:700,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'flex',alignItems:'center',justifyContent:'center',gap:3}}><span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{n.name}</span>{n.flag&&<span style={{fontSize:10,flexShrink:0}}>{FLAG_EMOJI[n.flag]}</span>}</div>
@@ -279,8 +325,8 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse}){
               </div>
             </div>
             {hasKids&&(
-              <div onClick={e=>{e.stopPropagation();onToggleCollapse(n.id);}}
-                style={{position:'absolute',bottom:-13,left:'50%',transform:'translateX(-50%)',background:isCol?C.amber:'#E2E8F0',border:'2px solid #fff',borderRadius:10,minWidth:22,height:22,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',zIndex:5,padding:'0 5px',fontSize:isCol?9:11,fontWeight:800,color:isCol?'#fff':'#64748B',userSelect:'none',WebkitUserSelect:'none',whiteSpace:'nowrap',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}>
+              <div onTouchStart={e=>{e.stopPropagation();if(lpRef.current){clearTimeout(lpRef.current);lpRef.current=null;}}} onClick={e=>{e.stopPropagation();onToggleCollapse(n.id);}}
+                style={{position:'absolute',bottom:-13,left:'50%',transform:'translateX(-50%)',background:isCol?'#F59E0B':'#E2E8F0',border:'2px solid #fff',borderRadius:10,minWidth:22,height:22,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',zIndex:5,padding:'0 5px',fontSize:isCol?9:11,fontWeight:800,color:isCol?'#fff':'#64748B',userSelect:'none',WebkitUserSelect:'none',whiteSpace:'nowrap',boxShadow:'0 1px 3px rgba(0,0,0,0.15)'}}>
                 {isCol?`+${dc}`:'▾'}
               </div>
             )}
@@ -288,10 +334,17 @@ function OrgChart({nodes,tnPhotos,onNodePress,collapsed,onToggleCollapse}){
         );
       })}
     </div>
-  );
+    {drag&&dn&&(
+      <div style={{position:'fixed',left:drag.ghostX-NW/2,top:drag.ghostY-NH/2,width:NW,height:NH,pointerEvents:'none',zIndex:9999,background:'#fff',borderRadius:12,border:`2px solid ${C.navy}`,boxShadow:'0 12px 36px rgba(0,0,0,0.35)',transform:'scale(1.08)',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:4,padding:'8px 6px',overflow:'hidden'}}>
+        {gPhoto?(<img src={gPhoto} alt="" style={{width:30,height:30,borderRadius:15,objectFit:'cover',flexShrink:0}}/>):(<div style={{width:30,height:30,borderRadius:15,background:gradient(dn.name),display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:10,fontWeight:800,flexShrink:0}}>{initials(dn.name)}</div>)}
+        <div style={{width:'100%',textAlign:'center',lineHeight:1.2}}>
+          <div style={{fontSize:11,fontWeight:700,color:'#111827',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{dn.name}</div>
+          {dn.role&&<div style={{fontSize:9,color:'#6B7280',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginTop:1}}>{dn.role}</div>}
+        </div>
+      </div>
+    )}
+  </>);
 }
-
-
 
 /* ─── MAIN APP ───────────────────────────────────────────────────── */
 export default function App(){
@@ -331,6 +384,7 @@ export default function App(){
   const [editNode,     setEditNode]     =useState(null);
   const [nodeDelCfm,   setNodeDelCfm]   =useState(false);
   const [collapsed,    setCollapsed]    =useState(new Set());
+  const dragActiveRef =useRef(false);
   /* Connect view */
   const [connView,     setConnView]     =useState("list");
   const [selConnect,   setSelConnect]   =useState(null);
@@ -483,6 +537,7 @@ export default function App(){
   const openEditNode=(node)=>{setEditNode({...node,flag:node.flag||null,photo:tnPhotos[node.id]||null,photoCleared:false});setShowNodePopup(false);setTView("nodeForm");};
   const saveNode=()=>{if(!editNode?.name?.trim())return;const isNew=!editNode.id;const nd={id:editNode.id||nid(),name:editNode.name.trim(),role:editNode.role||"",details:editNode.details||"",facts:editNode.facts||"",flag:editNode.flag||null,parentId:editNode.parentId??null,addedAt:editNode.addedAt||new Date().toISOString()};const newNodes=isNew?[...(selTree.nodes||[]),nd]:(selTree.nodes||[]).map(n=>n.id===nd.id?nd:n);const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);if(editNode.photo&&!editNode.photoCleared){try{localStorage.setItem(TN_PHOTO_PFX+nd.id,editNode.photo);setTnPhotos(p=>({...p,[nd.id]:editNode.photo}));}catch(_){}}else if(editNode.photoCleared){try{localStorage.removeItem(TN_PHOTO_PFX+nd.id);setTnPhotos(p=>{const n={...p};delete n[nd.id];return n;});}catch(_){}}setTView("detail");};
   const toggleCollapse=(id)=>setCollapsed(prev=>{const next=new Set(prev);next.has(id)?next.delete(id):next.add(id);return next;});
+  const reorderNode=(draggedId,targetId)=>{if(!draggedId||!targetId||draggedId===targetId)return;if(isDescOf(targetId,draggedId,selTree.nodes||[]))return;const newNodes=(selTree.nodes||[]).map(n=>n.id===draggedId?{...n,parentId:targetId}:n);const updTree={...selTree,nodes:newNodes};saveTrees(trees.map(t=>t.id===selTree.id?updTree:t));setSelTree(updTree);};
   const deleteNode=(node)=>{const toDelete=[node,...getAllDesc(node.id,selTree.nodes||[])];toDelete.forEach(n=>{try{localStorage.removeItem(TN_PHOTO_PFX+n.id);}catch(_){}});const delIds=new Set(toDelete.map(n=>n.id));const newNodes=(selTree.nodes||[]).filter(n=>!delIds.has(n.id));const updTree={...selTree,nodes:newNodes};const updTrees=trees.map(t=>t.id===selTree.id?updTree:t);saveTrees(updTrees);setSelTree(updTree);setTnPhotos(p=>{const next={...p};toDelete.forEach(n=>delete next[n.id]);return next;});setShowNodePopup(false);setSelNode(null);setNodeDelCfm(false);};
     const startNewConnect  =()=>{setEditConnect({id:null,name:"",note:"",memberIds:[]});setConnPickSearch("");setConnDelCfm(false);setConnView("editor");};
   const openConnectDetail=(g)=>{setSelConnect(g);setConnDelCfm(false);setConnView("detail");};
@@ -686,8 +741,8 @@ export default function App(){
           <button onClick={()=>openAddNode(null)} style={{padding:"13px 28px",background:C.amber,border:"none",borderRadius:13,color:"#fff",fontSize:15,fontWeight:700,cursor:"pointer",fontFamily:"inherit",boxShadow:"0 4px 14px rgba(245,158,11,0.4)"}}>+ Add First Person</button>
         </div>
       ):(
-        <ZoomableChart>
-          <OrgChart nodes={nodes} tnPhotos={tnPhotos} collapsed={collapsed} onToggleCollapse={toggleCollapse} onNodePress={node=>{setSelNode(node);setShowNodePopup(true);setNodeDelCfm(false);}}/>
+        <ZoomableChart dragActiveRef={dragActiveRef}>
+          <OrgChart nodes={nodes} tnPhotos={tnPhotos} collapsed={collapsed} onToggleCollapse={toggleCollapse} onReorder={reorderNode} dragActiveRef={dragActiveRef} onNodePress={node=>{setSelNode(node);setShowNodePopup(true);setNodeDelCfm(false);}}/>
         </ZoomableChart>
       )}
 
